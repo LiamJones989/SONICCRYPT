@@ -1,14 +1,13 @@
 const SAMPLE_RATE = 44100;
 
 /*
- * SONICCRYPT TURBO
+ * SONICCRYPT 16-FSK
  *
- * 16-FSK
- *
- * 0  = 1000 Hz
- * 1  = 1200 Hz
+ * 0 = 1000 Hz
+ * 1 = 1200 Hz
+ * 2 = 1400 Hz
  * ...
- * 15 = 4000 Hz
+ * F = 4000 Hz
  */
 
 const FREQUENCIES = Array.from(
@@ -18,42 +17,64 @@ const FREQUENCIES = Array.from(
 
 
 /*
- * TRANSMISSION SPEEDS
+ * IMPORTANT:
  *
- * 4 ms = fast
- * 6 ms = reliable
+ * These durations are based on the actual
+ * number of samples the sender creates.
+ *
+ * This prevents the receiver from drifting
+ * because of 44.1 kHz -> 48 kHz resampling.
  */
 
+const MODE_SAMPLE_COUNTS = {
+    turbo: 176,
+    reliable: 264
+};
+
 const MODES = {
-    turbo: 0.004,
-    reliable: 0.006
+    turbo:
+        MODE_SAMPLE_COUNTS.turbo /
+        SAMPLE_RATE,
+
+    reliable:
+        MODE_SAMPLE_COUNTS.reliable /
+        SAMPLE_RATE
 };
 
 let currentMode = "turbo";
 
 
 /*
- * SYNCHRONIZATION
+ * SYNCHRONIZATION PREAMBLE
  *
- * Alternating extreme frequencies.
+ * 1000 Hz
+ * 4000 Hz
+ * 1000 Hz
+ * 4000 Hz
+ * ...
  *
- * 0 = 1000 Hz
- * F = 4000 Hz
- *
- * This lets the receiver find the
- * exact beginning of the transmission.
+ * 48 symbols = strong ~192 ms
+ * synchronization signal.
  */
 
 const PREAMBLE = [];
 
-for (let i = 0; i < 32; i++) {
-    PREAMBLE.push(i % 2 === 0 ? 0 : 15);
+for (let i = 0; i < 48; i++) {
+
+    PREAMBLE.push(
+        i % 2 === 0
+            ? 0
+            : 15
+    );
 }
 
 
+/*
+ * STATE
+ */
+
 let selectedFile = null;
 
-let transmissionBytes = [];
 let transmissionSymbols = [];
 
 let audioBuffer = null;
@@ -200,16 +221,19 @@ function setMode(mode) {
     if (mode === "turbo") {
 
         modeInfo.textContent =
-            "TURBO: 4 ms symbols. Faster transmission.";
+            "TURBO: 4 ms symbols.";
 
     } else {
 
         modeInfo.textContent =
-            "RELIABLE: 6 ms symbols. Better for noisy environments.";
+            "RELIABLE: 6 ms symbols.";
     }
 
     if (selectedFile) {
-        prepareTransmission(selectedFile);
+
+        prepareTransmission(
+            selectedFile
+        );
     }
 }
 
@@ -239,12 +263,17 @@ fileInput.addEventListener(
         dataSize.textContent =
             formatBytes(file.size);
 
-        if (file.type.startsWith("image/")) {
+        if (
+            file.type.startsWith(
+                "image/"
+            )
+        ) {
 
             const url =
                 URL.createObjectURL(file);
 
-            imagePreview.src = url;
+            imagePreview.src =
+                url;
 
             previewContainer.style.display =
                 "block";
@@ -255,9 +284,13 @@ fileInput.addEventListener(
                 "none";
         }
 
-        log(`Selected: ${file.name}`);
+        log(
+            `Selected: ${file.name}`
+        );
 
-        await prepareTransmission(file);
+        await prepareTransmission(
+            file
+        );
     }
 );
 
@@ -293,7 +326,15 @@ async function prepareTransmission(file) {
 
 
     /*
-     * PAYLOAD
+     * HEADER = normal bits
+     */
+
+    const headerBits =
+        bytesToBits(header);
+
+
+    /*
+     * PAYLOAD =
      *
      * 5 random bits
      * +
@@ -305,15 +346,7 @@ async function prepareTransmission(file) {
 
 
     /*
-     * HEADER BITS
-     */
-
-    const headerBits =
-        bytesToBits(header);
-
-
-    /*
-     * COMPLETE DATA
+     * Combine.
      */
 
     const allBits = [
@@ -323,25 +356,24 @@ async function prepareTransmission(file) {
 
 
     /*
-     * 4 BITS = 1 FREQUENCY
+     * Convert every 4 bits
+     * into one 16-FSK symbol.
      */
 
     const dataSymbols =
-        bitsToSymbols(allBits);
+        bitsToSymbols(
+            allBits
+        );
 
 
     /*
-     * ADD SYNC PREAMBLE
+     * PREAMBLE + DATA
      */
 
     transmissionSymbols = [
         ...PREAMBLE,
         ...dataSymbols
     ];
-
-
-    transmissionBytes =
-        Array.from(bytes);
 
 
     const duration =
@@ -385,11 +417,11 @@ async function prepareTransmission(file) {
     );
 
     log(
-        `Payload bits: ${payloadBits.length.toLocaleString()}`
+        `Header: ${header.length} bytes`
     );
 
     log(
-        `Header bytes: ${header.length}`
+        `Payload: ${payloadBits.length.toLocaleString()} bits`
     );
 
     log(
@@ -464,6 +496,10 @@ function buildHeader(
     const result = [];
 
 
+    /*
+     * MAGIC
+     */
+
     result.push(
         0x53,
         0x43,
@@ -472,28 +508,46 @@ function buildHeader(
     );
 
 
+    /*
+     * VERSION
+     */
+
     result.push(2);
 
+
+    /*
+     * FILE NAME LENGTH
+     */
 
     result.push(
         (nameBytes.length >> 8) & 0xff,
         nameBytes.length & 0xff
     );
 
+
     result.push(
         ...nameBytes
     );
 
+
+    /*
+     * MIME LENGTH
+     */
 
     result.push(
         (mimeBytes.length >> 8) & 0xff,
         mimeBytes.length & 0xff
     );
 
+
     result.push(
         ...mimeBytes
     );
 
+
+    /*
+     * FILE SIZE
+     */
 
     result.push(
         (fileSize >>> 24) & 0xff,
@@ -503,6 +557,10 @@ function buildHeader(
     );
 
 
+    /*
+     * CRC32
+     */
+
     result.push(
         (checksum >>> 24) & 0xff,
         (checksum >>> 16) & 0xff,
@@ -511,19 +569,21 @@ function buildHeader(
     );
 
 
-    return new Uint8Array(result);
+    return new Uint8Array(
+        result
+    );
 }
 
 
 /*
  * CUSTOM PROTOCOL
  *
- * Every byte becomes:
+ * BYTE:
  *
- * RANDOM RANDOM RANDOM RANDOM RANDOM
- * DATA DATA DATA DATA DATA DATA DATA DATA
+ * R R R R R
+ * D D D D D D D D
  *
- * 13 bits total
+ * 13 bits total.
  */
 
 function encodeCustomBits(bytes) {
@@ -531,6 +591,10 @@ function encodeCustomBits(bytes) {
     const bits = [];
 
     for (const byte of bytes) {
+
+        /*
+         * RANDOM 5 BITS
+         */
 
         const randomBits =
             new Uint8Array(5);
@@ -540,7 +604,11 @@ function encodeCustomBits(bytes) {
         );
 
 
-        for (let i = 0; i < 5; i++) {
+        for (
+            let i = 0;
+            i < 5;
+            i++
+        ) {
 
             bits.push(
                 randomBits[i] & 1
@@ -548,7 +616,15 @@ function encodeCustomBits(bytes) {
         }
 
 
-        for (let i = 7; i >= 0; i--) {
+        /*
+         * ACTUAL 8 BITS
+         */
+
+        for (
+            let i = 7;
+            i >= 0;
+            i--
+        ) {
 
             bits.push(
                 (byte >> i) & 1
@@ -570,7 +646,11 @@ function bytesToBits(bytes) {
 
     for (const byte of bytes) {
 
-        for (let i = 7; i >= 0; i--) {
+        for (
+            let i = 7;
+            i >= 0;
+            i--
+        ) {
 
             bits.push(
                 (byte >> i) & 1
@@ -598,7 +678,11 @@ function bitsToSymbols(bits) {
 
         let value = 0;
 
-        for (let j = 0; j < 4; j++) {
+        for (
+            let j = 0;
+            j < 4;
+            j++
+        ) {
 
             value <<= 1;
 
@@ -625,14 +709,11 @@ function bitsToSymbols(bits) {
 
 function createAudioBuffer(symbols) {
 
-    const duration =
-        MODES[currentMode];
-
     const samplesPerSymbol =
-        Math.round(
-            SAMPLE_RATE *
-            duration
-        );
+        MODE_SAMPLE_COUNTS[
+            currentMode
+        ];
+
 
     const totalSamples =
         samplesPerSymbol *
@@ -641,9 +722,14 @@ function createAudioBuffer(symbols) {
 
     const buffer =
         new AudioBuffer({
-            length: totalSamples,
-            numberOfChannels: 1,
-            sampleRate: SAMPLE_RATE
+            length:
+                totalSamples,
+
+            numberOfChannels:
+                1,
+
+            sampleRate:
+                SAMPLE_RATE
         });
 
 
@@ -653,26 +739,25 @@ function createAudioBuffer(symbols) {
 
     let position = 0;
 
-    let phase = 0;
 
-
-    for (const symbol of symbols) {
+    for (
+        const symbol
+        of symbols
+    ) {
 
         const frequency =
             FREQUENCIES[symbol];
 
-        const phaseStep =
-            2 *
-            Math.PI *
-            frequency /
-            SAMPLE_RATE;
 
+        /*
+         * Small fades stop clicking.
+         */
 
         const fadeSamples =
             Math.min(
-                16,
+                12,
                 Math.floor(
-                    samplesPerSymbol / 5
+                    samplesPerSymbol / 6
                 )
             );
 
@@ -687,8 +772,7 @@ function createAudioBuffer(symbols) {
 
 
             if (
-                i <
-                fadeSamples
+                i < fadeSamples
             ) {
 
                 envelope =
@@ -696,7 +780,7 @@ function createAudioBuffer(symbols) {
                     fadeSamples;
 
             } else if (
-                i >
+                i >=
                 samplesPerSymbol -
                 fadeSamples
             ) {
@@ -711,23 +795,15 @@ function createAudioBuffer(symbols) {
 
 
             channel[position++] =
-                Math.sin(phase) *
-                0.45 *
+                Math.sin(
+                    2 *
+                    Math.PI *
+                    frequency *
+                    i /
+                    SAMPLE_RATE
+                ) *
+                0.4 *
                 envelope;
-
-
-            phase +=
-                phaseStep;
-
-
-            if (
-                phase >
-                Math.PI * 2
-            ) {
-
-                phase -=
-                    Math.PI * 2;
-            }
         }
     }
 
@@ -765,7 +841,8 @@ async function startTransmission() {
 
     audioContext =
         new AudioContext({
-            sampleRate: SAMPLE_RATE
+            sampleRate:
+                SAMPLE_RATE
         });
 
 
@@ -773,7 +850,8 @@ async function startTransmission() {
 
 
     sourceNode =
-        audioContext.createBufferSource();
+        audioContext
+            .createBufferSource();
 
 
     sourceNode.buffer =
@@ -789,6 +867,7 @@ async function startTransmission() {
         () => {
 
             if (isPlaying) {
+
                 finishTransmission();
             }
         };
@@ -811,9 +890,14 @@ async function startTransmission() {
         "TRANSMITTING";
 
 
-    playButton.disabled = true;
-    pauseButton.disabled = false;
-    stopButton.disabled = false;
+    playButton.disabled =
+        true;
+
+    pauseButton.disabled =
+        false;
+
+    stopButton.disabled =
+        false;
 
 
     log(
@@ -836,6 +920,7 @@ pauseButton.onclick =
             !audioContext ||
             !isPlaying
         ) {
+
             return;
         }
 
@@ -860,8 +945,11 @@ pauseButton.onclick =
             "RESUME";
 
 
-        playButton.disabled = false;
-        pauseButton.disabled = true;
+        playButton.disabled =
+            false;
+
+        pauseButton.disabled =
+            true;
 
 
         log(
@@ -892,12 +980,11 @@ async function resumeTransmission() {
         "TRANSMITTING";
 
 
-    playButton.textContent =
-        "PAUSE";
+    playButton.disabled =
+        true;
 
-
-    playButton.disabled = true;
-    pauseButton.disabled = false;
+    pauseButton.disabled =
+        false;
 
 
     log(
@@ -922,11 +1009,11 @@ stopButton.onclick =
 
 function stopTransmission() {
 
-    stopAudioOnly();
-
-
     isPlaying = false;
     isPaused = false;
+
+    stopAudioOnly();
+
 
     pausedAt = 0;
 
@@ -953,6 +1040,7 @@ function stopTransmission() {
     progressFill.style.width =
         "0%";
 
+
     progressPercent.textContent =
         "0%";
 
@@ -970,8 +1058,11 @@ function stopTransmission() {
     playButton.disabled =
         !audioBuffer;
 
-    pauseButton.disabled = true;
-    stopButton.disabled = true;
+    pauseButton.disabled =
+        true;
+
+    stopButton.disabled =
+        true;
 
 
     log(
@@ -1026,13 +1117,19 @@ function finishTransmission() {
         "TRANSMISSION COMPLETE";
 
 
-    playButton.disabled = false;
-    pauseButton.disabled = true;
-    stopButton.disabled = true;
+    playButton.disabled =
+        false;
+
+    pauseButton.disabled =
+        true;
+
+    stopButton.disabled =
+        true;
 
 
     progressFill.style.width =
         "100%";
+
 
     progressPercent.textContent =
         "100%";
@@ -1075,6 +1172,7 @@ function updateTimer() {
         !isPlaying ||
         !audioContext
     ) {
+
         return;
     }
 
@@ -1222,7 +1320,10 @@ function crc32(bytes) {
         0xffffffff;
 
 
-    for (const byte of bytes) {
+    for (
+        const byte
+        of bytes
+    ) {
 
         crc ^= byte;
 
@@ -1364,7 +1465,7 @@ turboButton.classList.add(
 
 
 log(
-    "SONICCRYPT TURBO transmitter initialized."
+    "SONICCRYPT transmitter initialized."
 );
 
 log(
@@ -1372,5 +1473,5 @@ log(
 );
 
 log(
-    "Synchronization preamble enabled."
+    "Synchronization enabled."
 );
