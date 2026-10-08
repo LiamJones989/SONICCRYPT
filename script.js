@@ -1,37 +1,93 @@
+/*
+============================================================
+SONICCRYPT TRANSMITTER
+============================================================
+
+16-FSK ACOUSTIC DATA TRANSMISSION
+
+Frequencies:
+
+0  = 1000 Hz
+1  = 1200 Hz
+2  = 1400 Hz
+3  = 1600 Hz
+4  = 1800 Hz
+5  = 2000 Hz
+6  = 2200 Hz
+7  = 2400 Hz
+8  = 2600 Hz
+9  = 2800 Hz
+A  = 3000 Hz
+B  = 3200 Hz
+C  = 3400 Hz
+D  = 3600 Hz
+E  = 3800 Hz
+F  = 4000 Hz
+
+PROTOCOL:
+
+PREAMBLE
+SCX1
+VERSION
+FILENAME
+MIME TYPE
+FILE SIZE
+CRC32
+PAYLOAD
+
+PAYLOAD:
+
+5 random bits
++
+8 actual data bits
+
+============================================================
+*/
+
+
+/* =========================================================
+   AUDIO SETTINGS
+========================================================= */
+
 const SAMPLE_RATE = 44100;
 
+
 /*
- * SONICCRYPT 16-FSK
- *
- * 0 = 1000 Hz
- * 1 = 1200 Hz
- * 2 = 1400 Hz
- * ...
- * F = 4000 Hz
+ * 16-FSK
  */
 
-const FREQUENCIES = Array.from(
-    { length: 16 },
-    (_, i) => 1000 + i * 200
-);
+const FREQUENCIES =
+    Array.from(
+        { length: 16 },
+        (_, i) => 1000 + i * 200
+    );
 
 
 /*
  * IMPORTANT:
  *
- * These durations are based on the actual
- * number of samples the sender creates.
+ * Turbo:
+ * 132 samples / 44100 Hz
+ * ≈ 2.99 ms
  *
- * This prevents the receiver from drifting
- * because of 44.1 kHz -> 48 kHz resampling.
+ * Reliable:
+ * 264 samples / 44100 Hz
+ * ≈ 5.99 ms
+ *
+ * These are the actual sample counts used to
+ * generate the audio.
  */
 
 const MODE_SAMPLE_COUNTS = {
-    turbo: 176,
+
+    turbo: 132,
+
     reliable: 264
 };
 
+
 const MODES = {
+
     turbo:
         MODE_SAMPLE_COUNTS.turbo /
         SAMPLE_RATE,
@@ -41,25 +97,38 @@ const MODES = {
         SAMPLE_RATE
 };
 
-let currentMode = "turbo";
 
+let currentMode =
+    "turbo";
+
+
+/* =========================================================
+   SYNCHRONIZATION PREAMBLE
+========================================================= */
 
 /*
- * SYNCHRONIZATION PREAMBLE
+ * Strong alternating 1000 / 4000 Hz signal.
  *
- * 1000 Hz
- * 4000 Hz
- * 1000 Hz
- * 4000 Hz
- * ...
+ * This gives the receiver something obvious to
+ * detect before SCX1 begins.
  *
- * 48 symbols = strong ~192 ms
- * synchronization signal.
+ * 48 symbols is approximately:
+ *
+ * Turbo:
+ * 48 × 2.99 ms ≈ 143.7 ms
+ *
+ * Reliable:
+ * 48 × 5.99 ms ≈ 287.7 ms
  */
 
 const PREAMBLE = [];
 
-for (let i = 0; i < 48; i++) {
+
+for (
+    let i = 0;
+    i < 48;
+    i++
+) {
 
     PREAMBLE.push(
         i % 2 === 0
@@ -70,166 +139,313 @@ for (let i = 0; i < 48; i++) {
 
 
 /*
- * STATE
+ * SCX1 itself.
+ *
+ * S = 0x53 -> 5,3
+ * C = 0x43 -> 4,3
+ * X = 0x58 -> 5,8
+ * 1 = 0x31 -> 3,1
  */
 
-let selectedFile = null;
-
-let transmissionSymbols = [];
-
-let audioBuffer = null;
-
-let audioContext = null;
-let sourceNode = null;
-
-let isPlaying = false;
-let isPaused = false;
-
-let transmissionStart = 0;
-let pausedAt = 0;
-
-let animationFrame = null;
+const MAGIC_SYMBOLS = [
+    5, 3,
+    4, 3,
+    5, 8,
+    3, 1
+];
 
 
-/*
- * ELEMENTS
- */
+/* =========================================================
+   STATE
+========================================================= */
+
+let selectedFile =
+    null;
+
+
+let transmissionSymbols =
+    [];
+
+
+let audioBuffer =
+    null;
+
+
+let audioContext =
+    null;
+
+
+let sourceNode =
+    null;
+
+
+let isPlaying =
+    false;
+
+
+let isPaused =
+    false;
+
+
+let transmissionStart =
+    0;
+
+
+let pausedAt =
+    0;
+
+
+let animationFrame =
+    null;
+
+
+/* =========================================================
+   ELEMENTS
+========================================================= */
 
 const fileInput =
-    document.getElementById("fileInput");
+    document.getElementById(
+        "fileInput"
+    );
+
 
 const fileInfo =
-    document.getElementById("fileInfo");
+    document.getElementById(
+        "fileInfo"
+    );
+
 
 const imagePreview =
-    document.getElementById("imagePreview");
+    document.getElementById(
+        "imagePreview"
+    );
+
 
 const previewContainer =
-    document.getElementById("previewContainer");
+    document.getElementById(
+        "previewContainer"
+    );
+
 
 const statusElement =
-    document.getElementById("status");
+    document.getElementById(
+        "status"
+    );
+
 
 const elapsedTime =
-    document.getElementById("elapsedTime");
+    document.getElementById(
+        "elapsedTime"
+    );
+
 
 const remainingTime =
-    document.getElementById("remainingTime");
+    document.getElementById(
+        "remainingTime"
+    );
+
 
 const totalTime =
-    document.getElementById("totalTime");
+    document.getElementById(
+        "totalTime"
+    );
+
 
 const progressFill =
-    document.getElementById("progressFill");
+    document.getElementById(
+        "progressFill"
+    );
+
 
 const progressPercent =
-    document.getElementById("progressPercent");
+    document.getElementById(
+        "progressPercent"
+    );
+
 
 const playButton =
-    document.getElementById("playButton");
+    document.getElementById(
+        "playButton"
+    );
+
 
 const pauseButton =
-    document.getElementById("pauseButton");
+    document.getElementById(
+        "pauseButton"
+    );
+
 
 const stopButton =
-    document.getElementById("stopButton");
+    document.getElementById(
+        "stopButton"
+    );
+
 
 const dataSize =
-    document.getElementById("dataSize");
+    document.getElementById(
+        "dataSize"
+    );
+
 
 const encodedBits =
-    document.getElementById("encodedBits");
+    document.getElementById(
+        "encodedBits"
+    );
+
 
 const symbolCount =
-    document.getElementById("symbolCount");
+    document.getElementById(
+        "symbolCount"
+    );
+
 
 const symbolSpeed =
-    document.getElementById("symbolSpeed");
+    document.getElementById(
+        "symbolSpeed"
+    );
+
 
 const canvas =
-    document.getElementById("waveformCanvas");
+    document.getElementById(
+        "waveformCanvas"
+    );
+
 
 const ctx =
-    canvas.getContext("2d");
+    canvas.getContext(
+        "2d"
+    );
+
 
 const logElement =
-    document.getElementById("log");
+    document.getElementById(
+        "log"
+    );
+
 
 const turboButton =
-    document.getElementById("turboMode");
+    document.getElementById(
+        "turboMode"
+    );
+
 
 const reliableButton =
-    document.getElementById("reliableMode");
+    document.getElementById(
+        "reliableMode"
+    );
+
 
 const modeInfo =
-    document.getElementById("modeInfo");
+    document.getElementById(
+        "modeInfo"
+    );
 
 
-/*
- * LOG
- */
+/* =========================================================
+   LOG
+========================================================= */
 
 function log(message) {
 
+    if (!logElement) {
+        return;
+    }
+
+
     const entry =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     entry.className =
         "log-entry";
+
 
     entry.innerHTML =
         `<span class="log-time">
             [${new Date().toLocaleTimeString()}]
         </span> ${message}`;
 
-    logElement.appendChild(entry);
+
+    logElement.appendChild(
+        entry
+    );
+
 
     logElement.scrollTop =
         logElement.scrollHeight;
 }
 
 
-/*
- * MODE
- */
+/* =========================================================
+   MODE
+========================================================= */
 
 turboButton.onclick =
-    () => setMode("turbo");
+    () => {
+
+        setMode(
+            "turbo"
+        );
+    };
+
 
 reliableButton.onclick =
-    () => setMode("reliable");
+    () => {
+
+        setMode(
+            "reliable"
+        );
+    };
 
 
-function setMode(mode) {
+function setMode(
+    mode
+) {
 
-    if (isPlaying || isPaused) {
+    if (
+        isPlaying ||
+        isPaused
+    ) {
+
         return;
     }
 
-    currentMode = mode;
+
+    currentMode =
+        mode;
+
 
     turboButton.classList.toggle(
         "active",
         mode === "turbo"
     );
 
+
     reliableButton.classList.toggle(
         "active",
         mode === "reliable"
     );
 
-    if (mode === "turbo") {
+
+    if (
+        mode === "turbo"
+    ) {
 
         modeInfo.textContent =
-            "TURBO: 4 ms symbols.";
+            "TURBO: ~3 ms symbols.";
 
     } else {
 
         modeInfo.textContent =
-            "RELIABLE: 6 ms symbols.";
+            "RELIABLE: ~6 ms symbols.";
     }
 
-    if (selectedFile) {
+
+    if (
+        selectedFile
+    ) {
 
         prepareTransmission(
             selectedFile
@@ -238,9 +454,9 @@ function setMode(mode) {
 }
 
 
-/*
- * FILE
- */
+/* =========================================================
+   FILE SELECTION
+========================================================= */
 
 fileInput.addEventListener(
     "change",
@@ -249,19 +465,34 @@ fileInput.addEventListener(
         const file =
             fileInput.files[0];
 
+
         if (!file) {
             return;
         }
 
+
         stopTransmission();
 
-        selectedFile = file;
+
+        selectedFile =
+            file;
+
 
         fileInfo.textContent =
-            `${file.name} — ${formatBytes(file.size)}`;
+            `${file.name} — ${formatBytes(
+                file.size
+            )}`;
+
 
         dataSize.textContent =
-            formatBytes(file.size);
+            formatBytes(
+                file.size
+            );
+
+
+        /*
+         * Image preview.
+         */
 
         if (
             file.type.startsWith(
@@ -270,10 +501,14 @@ fileInput.addEventListener(
         ) {
 
             const url =
-                URL.createObjectURL(file);
+                URL.createObjectURL(
+                    file
+                );
+
 
             imagePreview.src =
                 url;
+
 
             previewContainer.style.display =
                 "block";
@@ -284,9 +519,11 @@ fileInput.addEventListener(
                 "none";
         }
 
+
         log(
             `Selected: ${file.name}`
         );
+
 
         await prepareTransmission(
             file
@@ -295,24 +532,30 @@ fileInput.addEventListener(
 );
 
 
-/*
- * PREPARE
- */
+/* =========================================================
+   PREPARE TRANSMISSION
+========================================================= */
 
-async function prepareTransmission(file) {
+async function prepareTransmission(
+    file
+) {
 
     statusElement.textContent =
         "ENCODING";
 
+
     const buffer =
         await file.arrayBuffer();
 
+
     const bytes =
-        new Uint8Array(buffer);
+        new Uint8Array(
+            buffer
+        );
 
 
     /*
-     * HEADER
+     * Build header.
      */
 
     const header =
@@ -326,15 +569,17 @@ async function prepareTransmission(file) {
 
 
     /*
-     * HEADER = normal bits
+     * Header is normal 8-bit data.
      */
 
     const headerBits =
-        bytesToBits(header);
+        bytesToBits(
+            header
+        );
 
 
     /*
-     * PAYLOAD =
+     * Payload:
      *
      * 5 random bits
      * +
@@ -342,11 +587,13 @@ async function prepareTransmission(file) {
      */
 
     const payloadBits =
-        encodeCustomBits(bytes);
+        encodeCustomBits(
+            bytes
+        );
 
 
     /*
-     * Combine.
+     * Combine header + payload.
      */
 
     const allBits = [
@@ -356,8 +603,8 @@ async function prepareTransmission(file) {
 
 
     /*
-     * Convert every 4 bits
-     * into one 16-FSK symbol.
+     * Convert four bits into
+     * one 16-FSK symbol.
      */
 
     const dataSymbols =
@@ -367,11 +614,21 @@ async function prepareTransmission(file) {
 
 
     /*
-     * PREAMBLE + DATA
+     * FINAL TRANSMISSION:
+     *
+     * PREAMBLE
+     * +
+     * SCX1
+     * +
+     * DATA
      */
 
     transmissionSymbols = [
+
         ...PREAMBLE,
+
+        ...MAGIC_SYMBOLS,
+
         ...dataSymbols
     ];
 
@@ -381,55 +638,112 @@ async function prepareTransmission(file) {
         MODES[currentMode];
 
 
+    /*
+     * UI.
+     */
+
     encodedBits.textContent =
         allBits.length.toLocaleString();
+
 
     symbolCount.textContent =
         transmissionSymbols.length.toLocaleString();
 
+
     symbolSpeed.textContent =
         `${Math.round(
-            1 / MODES[currentMode]
+            1 /
+            MODES[currentMode]
         )}/sec`;
 
+
     totalTime.textContent =
-        formatTime(duration);
+        formatTime(
+            duration
+        );
+
 
     remainingTime.textContent =
-        formatTime(duration);
+        formatTime(
+            duration
+        );
+
 
     elapsedTime.textContent =
         "00:00";
 
+
     progressFill.style.width =
         "0%";
+
 
     progressPercent.textContent =
         "0%";
 
 
+    /*
+     * LOG.
+     */
+
     log(
         `File: ${file.name}`
     );
 
-    log(
-        `Original size: ${bytes.length.toLocaleString()} bytes`
-    );
 
     log(
-        `Header: ${header.length} bytes`
+        `Original size: ${
+            bytes.length.toLocaleString()
+        } bytes`
     );
 
-    log(
-        `Payload: ${payloadBits.length.toLocaleString()} bits`
-    );
 
     log(
-        `Total symbols: ${transmissionSymbols.length.toLocaleString()}`
+        `Header: ${
+            header.length
+        } bytes`
     );
 
+
     log(
-        `Estimated time: ${formatTime(duration)}`
+        `Payload: ${
+            payloadBits.length.toLocaleString()
+        } bits`
+    );
+
+
+    log(
+        `Preamble: ${
+            PREAMBLE.length
+        } symbols`
+    );
+
+
+    log(
+        "SCX1 synchronization header added."
+    );
+
+
+    log(
+        `Total symbols: ${
+            transmissionSymbols.length.toLocaleString()
+        }`
+    );
+
+
+    log(
+        `Symbol duration: ${
+            (
+                MODES[currentMode] *
+                1000
+            ).toFixed(2)
+        } ms`
+    );
+
+
+    log(
+        `Estimated time: ${
+            formatTime(duration)
+        }`
     );
 
 
@@ -437,11 +751,19 @@ async function prepareTransmission(file) {
         "GENERATING AUDIO";
 
 
+    /*
+     * Generate audio.
+     */
+
     audioBuffer =
         createAudioBuffer(
             transmissionSymbols
         );
 
+
+    /*
+     * Draw waveform.
+     */
 
     drawWaveform(
         audioBuffer
@@ -451,26 +773,31 @@ async function prepareTransmission(file) {
     statusElement.textContent =
         "READY";
 
+
     playButton.disabled =
         false;
 
+
     pauseButton.disabled =
         true;
+
 
     stopButton.disabled =
         true;
 }
 
 
+/* =========================================================
+   HEADER
+========================================================= */
+
 /*
- * HEADER
- *
- * SCX2
+ * SCX1
  *
  * 4 magic bytes
  * 1 version
- * 2 name length
- * name
+ * 2 filename length
+ * filename
  * 2 MIME length
  * MIME
  * 4 file size
@@ -487,24 +814,33 @@ function buildHeader(
     const encoder =
         new TextEncoder();
 
+
     const nameBytes =
-        encoder.encode(name);
+        encoder.encode(
+            name
+        );
+
 
     const mimeBytes =
-        encoder.encode(mime);
+        encoder.encode(
+            mime
+        );
+
 
     const result = [];
 
 
     /*
      * MAGIC
+     *
+     * SCX1
      */
 
     result.push(
         0x53,
         0x43,
         0x58,
-        0x32
+        0x31
     );
 
 
@@ -512,7 +848,9 @@ function buildHeader(
      * VERSION
      */
 
-    result.push(2);
+    result.push(
+        1
+    );
 
 
     /*
@@ -520,10 +858,20 @@ function buildHeader(
      */
 
     result.push(
-        (nameBytes.length >> 8) & 0xff,
-        nameBytes.length & 0xff
+
+        (
+            nameBytes.length >>
+            8
+        ) & 0xff,
+
+        nameBytes.length &
+            0xff
     );
 
+
+    /*
+     * FILE NAME
+     */
 
     result.push(
         ...nameBytes
@@ -535,10 +883,20 @@ function buildHeader(
      */
 
     result.push(
-        (mimeBytes.length >> 8) & 0xff,
-        mimeBytes.length & 0xff
+
+        (
+            mimeBytes.length >>
+            8
+        ) & 0xff,
+
+        mimeBytes.length &
+            0xff
     );
 
+
+    /*
+     * MIME
+     */
 
     result.push(
         ...mimeBytes
@@ -550,10 +908,21 @@ function buildHeader(
      */
 
     result.push(
-        (fileSize >>> 24) & 0xff,
-        (fileSize >>> 16) & 0xff,
-        (fileSize >>> 8) & 0xff,
-        fileSize & 0xff
+
+        (
+            fileSize >>> 24
+        ) & 0xff,
+
+        (
+            fileSize >>> 16
+        ) & 0xff,
+
+        (
+            fileSize >>> 8
+        ) & 0xff,
+
+        fileSize &
+            0xff
     );
 
 
@@ -562,10 +931,21 @@ function buildHeader(
      */
 
     result.push(
-        (checksum >>> 24) & 0xff,
-        (checksum >>> 16) & 0xff,
-        (checksum >>> 8) & 0xff,
-        checksum & 0xff
+
+        (
+            checksum >>> 24
+        ) & 0xff,
+
+        (
+            checksum >>> 16
+        ) & 0xff,
+
+        (
+            checksum >>> 8
+        ) & 0xff,
+
+        checksum &
+            0xff
     );
 
 
@@ -575,29 +955,40 @@ function buildHeader(
 }
 
 
+/* =========================================================
+   CUSTOM PROTOCOL
+========================================================= */
+
 /*
- * CUSTOM PROTOCOL
- *
- * BYTE:
+ * Each original byte becomes:
  *
  * R R R R R
  * D D D D D D D D
  *
- * 13 bits total.
+ * 13 total bits.
  */
 
-function encodeCustomBits(bytes) {
+function encodeCustomBits(
+    bytes
+) {
 
     const bits = [];
 
-    for (const byte of bytes) {
+
+    for (
+        const byte
+        of bytes
+    ) {
 
         /*
          * RANDOM 5 BITS
          */
 
         const randomBits =
-            new Uint8Array(5);
+            new Uint8Array(
+                5
+            );
+
 
         crypto.getRandomValues(
             randomBits
@@ -611,7 +1002,8 @@ function encodeCustomBits(bytes) {
         ) {
 
             bits.push(
-                randomBits[i] & 1
+                randomBits[i] &
+                1
             );
         }
 
@@ -627,24 +1019,34 @@ function encodeCustomBits(bytes) {
         ) {
 
             bits.push(
-                (byte >> i) & 1
+                (
+                    byte >>
+                    i
+                ) & 1
             );
         }
     }
+
 
     return bits;
 }
 
 
-/*
- * BYTES -> BITS
- */
+/* =========================================================
+   BYTES TO BITS
+========================================================= */
 
-function bytesToBits(bytes) {
+function bytesToBits(
+    bytes
+) {
 
     const bits = [];
 
-    for (const byte of bytes) {
+
+    for (
+        const byte
+        of bytes
+    ) {
 
         for (
             let i = 7;
@@ -653,22 +1055,29 @@ function bytesToBits(bytes) {
         ) {
 
             bits.push(
-                (byte >> i) & 1
+                (
+                    byte >>
+                    i
+                ) & 1
             );
         }
     }
+
 
     return bits;
 }
 
 
-/*
- * BITS -> 4-BIT SYMBOLS
- */
+/* =========================================================
+   BITS TO 16-FSK SYMBOLS
+========================================================= */
 
-function bitsToSymbols(bits) {
+function bitsToSymbols(
+    bits
+) {
 
     const symbols = [];
+
 
     for (
         let i = 0;
@@ -678,13 +1087,16 @@ function bitsToSymbols(bits) {
 
         let value = 0;
 
+
         for (
             let j = 0;
             j < 4;
             j++
         ) {
 
-            value <<= 1;
+            value <<=
+                1;
+
 
             if (
                 i + j <
@@ -696,18 +1108,24 @@ function bitsToSymbols(bits) {
             }
         }
 
-        symbols.push(value);
+
+        symbols.push(
+            value
+        );
     }
+
 
     return symbols;
 }
 
 
-/*
- * AUDIO GENERATION
- */
+/* =========================================================
+   AUDIO GENERATION
+========================================================= */
 
-function createAudioBuffer(symbols) {
+function createAudioBuffer(
+    symbols
+) {
 
     const samplesPerSymbol =
         MODE_SAMPLE_COUNTS[
@@ -722,6 +1140,7 @@ function createAudioBuffer(symbols) {
 
     const buffer =
         new AudioBuffer({
+
             length:
                 totalSamples,
 
@@ -734,10 +1153,22 @@ function createAudioBuffer(symbols) {
 
 
     const channel =
-        buffer.getChannelData(0);
+        buffer.getChannelData(
+            0
+        );
 
 
     let position = 0;
+
+
+    /*
+     * Phase is maintained across symbols.
+     *
+     * This makes the generated signal cleaner
+     * and reduces discontinuities.
+     */
+
+    let phase = 0;
 
 
     for (
@@ -746,20 +1177,36 @@ function createAudioBuffer(symbols) {
     ) {
 
         const frequency =
-            FREQUENCIES[symbol];
+            FREQUENCIES[
+                symbol
+            ];
 
 
         /*
-         * Small fades stop clicking.
+         * Small fades stop hard clicks.
+         *
+         * Because the receiver analyzes the middle
+         * of each symbol, these fades do not interfere
+         * with decoding.
          */
 
         const fadeSamples =
             Math.min(
                 12,
                 Math.floor(
-                    samplesPerSymbol / 6
+                    samplesPerSymbol /
+                    6
                 )
             );
+
+
+        const phaseStep =
+            (
+                2 *
+                Math.PI *
+                frequency
+            ) /
+            SAMPLE_RATE;
 
 
         for (
@@ -768,11 +1215,13 @@ function createAudioBuffer(symbols) {
             i++
         ) {
 
-            let envelope = 1;
+            let envelope =
+                1;
 
 
             if (
-                i < fadeSamples
+                i <
+                fadeSamples
             ) {
 
                 envelope =
@@ -796,14 +1245,28 @@ function createAudioBuffer(symbols) {
 
             channel[position++] =
                 Math.sin(
-                    2 *
-                    Math.PI *
-                    frequency *
-                    i /
-                    SAMPLE_RATE
+                    phase
                 ) *
-                0.4 *
+                0.45 *
                 envelope;
+
+
+            phase +=
+                phaseStep;
+
+
+            /*
+             * Keep phase bounded.
+             */
+
+            if (
+                phase >
+                Math.PI * 2
+            ) {
+
+                phase -=
+                    Math.PI * 2;
+            }
         }
     }
 
@@ -812,18 +1275,24 @@ function createAudioBuffer(symbols) {
 }
 
 
-/*
- * PLAY
- */
+/* =========================================================
+   PLAY
+========================================================= */
 
 playButton.onclick =
     async () => {
 
-        if (!audioBuffer) {
+        if (
+            !audioBuffer
+        ) {
+
             return;
         }
 
-        if (isPaused) {
+
+        if (
+            isPaused
+        ) {
 
             await resumeTransmission();
 
@@ -839,11 +1308,12 @@ async function startTransmission() {
     stopAudioOnly();
 
 
+    /*
+     * Use the generated buffer's sample rate.
+     */
+
     audioContext =
-        new AudioContext({
-            sampleRate:
-                SAMPLE_RATE
-        });
+        new AudioContext();
 
 
     await audioContext.resume();
@@ -866,7 +1336,9 @@ async function startTransmission() {
     sourceNode.onended =
         () => {
 
-            if (isPlaying) {
+            if (
+                isPlaying
+            ) {
 
                 finishTransmission();
             }
@@ -882,8 +1354,13 @@ async function startTransmission() {
 
     pausedAt = 0;
 
-    isPlaying = true;
-    isPaused = false;
+
+    isPlaying =
+        true;
+
+
+    isPaused =
+        false;
 
 
     statusElement.textContent =
@@ -893,8 +1370,10 @@ async function startTransmission() {
     playButton.disabled =
         true;
 
+
     pauseButton.disabled =
         false;
+
 
     stopButton.disabled =
         false;
@@ -909,9 +1388,9 @@ async function startTransmission() {
 }
 
 
-/*
- * PAUSE
- */
+/* =========================================================
+   PAUSE
+========================================================= */
 
 pauseButton.onclick =
     async () => {
@@ -933,8 +1412,12 @@ pauseButton.onclick =
         await audioContext.suspend();
 
 
-        isPlaying = false;
-        isPaused = true;
+        isPlaying =
+            false;
+
+
+        isPaused =
+            true;
 
 
         statusElement.textContent =
@@ -948,6 +1431,7 @@ pauseButton.onclick =
         playButton.disabled =
             false;
 
+
         pauseButton.disabled =
             true;
 
@@ -958,9 +1442,9 @@ pauseButton.onclick =
     };
 
 
-/*
- * RESUME
- */
+/* =========================================================
+   RESUME
+========================================================= */
 
 async function resumeTransmission() {
 
@@ -972,8 +1456,12 @@ async function resumeTransmission() {
         pausedAt;
 
 
-    isPlaying = true;
-    isPaused = false;
+    isPlaying =
+        true;
+
+
+    isPaused =
+        false;
 
 
     statusElement.textContent =
@@ -982,6 +1470,7 @@ async function resumeTransmission() {
 
     playButton.disabled =
         true;
+
 
     pauseButton.disabled =
         false;
@@ -996,9 +1485,9 @@ async function resumeTransmission() {
 }
 
 
-/*
- * STOP
- */
+/* =========================================================
+   STOP
+========================================================= */
 
 stopButton.onclick =
     () => {
@@ -1009,8 +1498,13 @@ stopButton.onclick =
 
 function stopTransmission() {
 
-    isPlaying = false;
-    isPaused = false;
+    isPlaying =
+        false;
+
+
+    isPaused =
+        false;
+
 
     stopAudioOnly();
 
@@ -1034,7 +1528,9 @@ function stopTransmission() {
 
 
     remainingTime.textContent =
-        formatTime(duration);
+        formatTime(
+            duration
+        );
 
 
     progressFill.style.width =
@@ -1058,8 +1554,10 @@ function stopTransmission() {
     playButton.disabled =
         !audioBuffer;
 
+
     pauseButton.disabled =
         true;
+
 
     stopButton.disabled =
         true;
@@ -1071,41 +1569,64 @@ function stopTransmission() {
 }
 
 
-/*
- * STOP AUDIO
- */
+/* =========================================================
+   STOP AUDIO ONLY
+========================================================= */
 
 function stopAudioOnly() {
 
-    if (sourceNode) {
+    if (
+        sourceNode
+    ) {
 
         try {
+
             sourceNode.stop();
+
         } catch {}
 
-        sourceNode.disconnect();
 
-        sourceNode = null;
+        try {
+
+            sourceNode.disconnect();
+
+        } catch {}
+
+
+        sourceNode =
+            null;
     }
 
 
-    if (audioContext) {
+    if (
+        audioContext
+    ) {
 
-        audioContext.close();
+        try {
 
-        audioContext = null;
+            audioContext.close();
+
+        } catch {}
+
+
+        audioContext =
+            null;
     }
 }
 
 
-/*
- * FINISH
- */
+/* =========================================================
+   FINISH
+========================================================= */
 
 function finishTransmission() {
 
-    isPlaying = false;
-    isPaused = false;
+    isPlaying =
+        false;
+
+
+    isPaused =
+        false;
 
 
     cancelAnimationFrame(
@@ -1120,8 +1641,10 @@ function finishTransmission() {
     playButton.disabled =
         false;
 
+
     pauseButton.disabled =
         true;
+
 
     stopButton.disabled =
         true;
@@ -1150,21 +1673,30 @@ function finishTransmission() {
     );
 
 
-    if (audioContext) {
+    if (
+        audioContext
+    ) {
 
-        audioContext.close();
+        try {
 
-        audioContext = null;
+            audioContext.close();
+
+        } catch {}
+
+
+        audioContext =
+            null;
     }
 
 
-    sourceNode = null;
+    sourceNode =
+        null;
 }
 
 
-/*
- * TIMER
- */
+/* =========================================================
+   TIMER
+========================================================= */
 
 function updateTimer() {
 
@@ -1189,19 +1721,23 @@ function updateTimer() {
     const progress =
         Math.min(
             1,
-            elapsed / total
+            elapsed /
+            total
         );
 
 
     elapsedTime.textContent =
-        formatTime(elapsed);
+        formatTime(
+            elapsed
+        );
 
 
     remainingTime.textContent =
         formatTime(
             Math.max(
                 0,
-                total - elapsed
+                total -
+                elapsed
             )
         );
 
@@ -1223,15 +1759,18 @@ function updateTimer() {
 }
 
 
-/*
- * WAVEFORM
- */
+/* =========================================================
+   WAVEFORM
+========================================================= */
 
-function drawWaveform(buffer) {
+function drawWaveform(
+    buffer
+) {
 
     canvas.width =
         canvas.clientWidth *
         window.devicePixelRatio;
+
 
     canvas.height =
         canvas.clientHeight *
@@ -1247,11 +1786,14 @@ function drawWaveform(buffer) {
 
 
     const data =
-        buffer.getChannelData(0);
+        buffer.getChannelData(
+            0
+        );
 
 
     const center =
-        canvas.height / 2;
+        canvas.height /
+        2;
 
 
     const step =
@@ -1274,7 +1816,9 @@ function drawWaveform(buffer) {
     ) {
 
         const value =
-            data[x * step] || 0;
+            data[
+                x * step
+            ] || 0;
 
 
         const y =
@@ -1284,7 +1828,9 @@ function drawWaveform(buffer) {
             0.85;
 
 
-        if (x === 0) {
+        if (
+            x === 0
+        ) {
 
             ctx.moveTo(
                 x,
@@ -1304,17 +1850,22 @@ function drawWaveform(buffer) {
     ctx.strokeStyle =
         "#4aa8ff";
 
-    ctx.lineWidth = 1;
+
+    ctx.lineWidth =
+        1;
+
 
     ctx.stroke();
 }
 
 
-/*
- * CRC32
- */
+/* =========================================================
+   CRC32
+========================================================= */
 
-function crc32(bytes) {
+function crc32(
+    bytes
+) {
 
     let crc =
         0xffffffff;
@@ -1325,7 +1876,8 @@ function crc32(bytes) {
         of bytes
     ) {
 
-        crc ^= byte;
+        crc ^=
+            byte;
 
 
         for (
@@ -1335,9 +1887,13 @@ function crc32(bytes) {
         ) {
 
             crc =
-                (crc >>> 1) ^
                 (
-                    -(crc & 1) &
+                    crc >>> 1
+                ) ^
+                (
+                    -(
+                        crc & 1
+                    ) &
                     0xedb88320
                 );
         }
@@ -1351,67 +1907,119 @@ function crc32(bytes) {
 }
 
 
-/*
- * FORMAT TIME
- */
+/* =========================================================
+   FORMAT TIME
+========================================================= */
 
-function formatTime(seconds) {
+function formatTime(
+    seconds
+) {
 
     seconds =
         Math.max(
             0,
-            Math.floor(seconds)
+            Math.floor(
+                seconds
+            )
         );
 
 
     const hours =
         Math.floor(
-            seconds / 3600
+            seconds /
+            3600
         );
 
 
     const minutes =
         Math.floor(
-            (seconds % 3600) / 60
+            (
+                seconds %
+                3600
+            ) /
+            60
         );
 
 
     const secs =
-        seconds % 60;
+        seconds %
+        60;
 
 
-    if (hours > 0) {
+    if (
+        hours > 0
+    ) {
 
         return (
+
             String(hours)
-                .padStart(2, "0") +
-            ":" +
+                .padStart(
+                    2,
+                    "0"
+                )
+
+            +
+
+            ":"
+
+            +
+
             String(minutes)
-                .padStart(2, "0") +
-            ":" +
+                .padStart(
+                    2,
+                    "0"
+                )
+
+            +
+
+            ":"
+
+            +
+
             String(secs)
-                .padStart(2, "0")
+                .padStart(
+                    2,
+                    "0"
+                )
         );
     }
 
 
     return (
+
         String(minutes)
-            .padStart(2, "0") +
-        ":" +
+            .padStart(
+                2,
+                "0"
+            )
+
+        +
+
+        ":"
+
+        +
+
         String(secs)
-            .padStart(2, "0")
+            .padStart(
+                2,
+                "0"
+            )
     );
 }
 
 
-/*
- * FORMAT BYTES
- */
+/* =========================================================
+   FORMAT BYTES
+========================================================= */
 
-function formatBytes(bytes) {
+function formatBytes(
+    bytes
+) {
 
-    if (bytes === 0) {
+    if (
+        bytes === 0
+    ) {
+
         return "0 B";
     }
 
@@ -1425,13 +2033,17 @@ function formatBytes(bytes) {
 
 
     const index =
-        Math.floor(
-            Math.log(bytes) /
-            Math.log(1024)
+        Math.min(
+            units.length - 1,
+            Math.floor(
+                Math.log(bytes) /
+                Math.log(1024)
+            )
         );
 
 
     return (
+
         (
             bytes /
             Math.pow(
@@ -1443,20 +2055,32 @@ function formatBytes(bytes) {
                 ? 0
                 : 2
         )
+
         +
-        " " +
+
+        " "
+
+        +
+
         units[index]
     );
 }
 
 
-/*
- * INITIAL
- */
+/* =========================================================
+   INITIALIZATION
+========================================================= */
 
-playButton.disabled = true;
-pauseButton.disabled = true;
-stopButton.disabled = true;
+playButton.disabled =
+    true;
+
+
+pauseButton.disabled =
+    true;
+
+
+stopButton.disabled =
+    true;
 
 
 turboButton.classList.add(
@@ -1464,14 +2088,40 @@ turboButton.classList.add(
 );
 
 
+if (
+    modeInfo
+) {
+
+    modeInfo.textContent =
+        "TURBO: ~3 ms symbols.";
+}
+
+
 log(
     "SONICCRYPT transmitter initialized."
 );
+
 
 log(
     "16-FSK: 1000-4000 Hz."
 );
 
+
 log(
-    "Synchronization enabled."
+    "SCX1 protocol enabled."
+);
+
+
+log(
+    "48-symbol synchronization preamble enabled."
+);
+
+
+log(
+    "Turbo: ~3 ms symbols."
+);
+
+
+log(
+    "Reliable: ~6 ms symbols."
 );
