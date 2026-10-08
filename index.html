@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SONICCRYPT TRANSMITTER</title>
+    <title>SONICCRYPT RECEIVER</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -13,26 +13,30 @@
 
     <header>
         <div class="logo">SONICCRYPT</div>
-        <div class="subtitle">TURBO ACOUSTIC DATA TRANSMITTER</div>
+        <div class="subtitle">TURBO ACOUSTIC DATA RECEIVER</div>
     </header>
+
 
     <main>
 
         <section class="panel">
 
-            <h2>FILE</h2>
+            <h2>RECEIVER</h2>
 
-            <label class="upload-box">
-                <input type="file" id="fileInput">
-                <span>SELECT FILE</span>
-            </label>
-
-            <div id="fileInfo" class="file-info">
-                No file selected
+            <div id="status" class="status">
+                MICROPHONE OFF
             </div>
 
-            <div id="previewContainer" class="preview-container">
-                <img id="imagePreview" alt="Preview">
+            <div class="controls">
+
+                <button id="startButton">
+                    START LISTENING
+                </button>
+
+                <button id="stopButton" disabled>
+                    STOP
+                </button>
+
             </div>
 
         </section>
@@ -40,24 +44,29 @@
 
         <section class="panel">
 
-            <h2>TRANSMISSION MODE</h2>
+            <h2>LIVE SIGNAL</h2>
 
-            <div class="mode-grid">
+            <div class="signal-grid">
 
-                <button id="turboMode" class="mode-button active">
-                    TURBO
-                    <small>3 ms / symbol</small>
-                </button>
+                <div class="signal-box">
+                    <span>SIGNAL</span>
+                    <strong id="signalStrength">0%</strong>
+                </div>
 
-                <button id="reliableMode" class="mode-button">
-                    RELIABLE
-                    <small>6 ms / symbol</small>
-                </button>
+                <div class="signal-box">
+                    <span>FREQUENCY</span>
+                    <strong id="frequency">---</strong>
+                </div>
+
+                <div class="signal-box">
+                    <span>SYMBOLS</span>
+                    <strong id="symbolsReceived">0</strong>
+                </div>
 
             </div>
 
-            <div class="mode-info" id="modeInfo">
-                TURBO: maximum speed. Best with short distance and low noise.
+            <div class="signal-bar">
+                <div id="signalFill"></div>
             </div>
 
         </section>
@@ -67,78 +76,34 @@
 
             <h2>TRANSMISSION</h2>
 
-            <div id="status" class="status">
-                WAITING FOR FILE
+            <div id="fileName" class="file-name">
+                Waiting for SONICCRYPT...
             </div>
-
-
-            <div class="timer-grid">
-
-                <div class="timer-box">
-                    <span>ELAPSED</span>
-                    <strong id="elapsedTime">00:00</strong>
-                </div>
-
-                <div class="timer-box">
-                    <span>REMAINING</span>
-                    <strong id="remainingTime">00:00</strong>
-                </div>
-
-                <div class="timer-box">
-                    <span>TOTAL</span>
-                    <strong id="totalTime">00:00</strong>
-                </div>
-
-            </div>
-
 
             <div class="progress-info">
-                <span>PROGRESS</span>
-                <strong id="progressPercent">0%</strong>
+                <span id="receivedText">0 B / 0 B</span>
+                <strong id="receivePercent">0%</strong>
             </div>
 
             <div class="progress-bar">
-                <div id="progressFill"></div>
+                <div id="receiveFill"></div>
             </div>
 
-
-            <div class="controls">
-
-                <button id="playButton" disabled>
-                    PLAY
-                </button>
-
-                <button id="pauseButton" disabled>
-                    PAUSE
-                </button>
-
-                <button id="stopButton" disabled>
-                    STOP
-                </button>
-
-            </div>
-
-
-            <div class="details">
+            <div class="receive-stats">
 
                 <div>
-                    <span>FILE SIZE</span>
-                    <strong id="dataSize">0 B</strong>
+                    <span>RECEIVED</span>
+                    <strong id="receivedBytes">0 B</strong>
                 </div>
 
                 <div>
-                    <span>DATA BITS</span>
-                    <strong id="encodedBits">0</strong>
+                    <span>EXPECTED</span>
+                    <strong id="expectedBytes">0 B</strong>
                 </div>
 
                 <div>
-                    <span>SYMBOLS</span>
-                    <strong id="symbolCount">0</strong>
-                </div>
-
-                <div>
-                    <span>SYMBOL SPEED</span>
-                    <strong id="symbolSpeed">0</strong>
+                    <span>SPEED</span>
+                    <strong id="receiveSpeed">0 B/s</strong>
                 </div>
 
             </div>
@@ -148,16 +113,26 @@
 
         <section class="panel">
 
-            <h2>SONIC WAVEFORM</h2>
+            <h2>LIVE IMAGE / FILE</h2>
 
-            <canvas id="waveformCanvas"></canvas>
+            <div id="previewStatus">
+                Waiting for data...
+            </div>
+
+            <div class="image-container">
+                <img id="receivedImage" alt="Received file">
+            </div>
+
+            <a id="downloadButton" class="download-button">
+                DOWNLOAD RECEIVED FILE
+            </a>
 
         </section>
 
 
         <section class="panel">
 
-            <h2>TRANSMITTER LOG</h2>
+            <h2>RECEIVER LOG</h2>
 
             <div id="log"></div>
 
@@ -166,7 +141,7 @@
     </main>
 
     <footer>
-        SONICCRYPT // 16-FSK // LOCAL ACOUSTIC TRANSFER
+        SONICCRYPT // 16-FSK // LIVE ACOUSTIC DECODER
     </footer>
 
 </div>
