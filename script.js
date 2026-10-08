@@ -1,447 +1,396 @@
-/*
-    SONICCRYPT
-    Acoustic Data Transmission Prototype
-
-    Protocol:
-
-    1. File bytes
-    2. Convert each byte to binary
-    3. Generate 5 random bits
-    4. Add random bits BEFORE the byte
-    5. Result = 13-bit block
-    6. Convert bits into FSK audio
-*/
-
-
-const fileInput = document.getElementById("fileInput");
-const uploadArea = document.getElementById("uploadArea");
-
-const previewContainer =
-    document.getElementById("previewContainer");
-
-const imagePreview =
-    document.getElementById("imagePreview");
-
-const fileName =
-    document.getElementById("fileName");
-
-const fileSize =
-    document.getElementById("fileSize");
-
-const removeFile =
-    document.getElementById("removeFile");
-
-const generateButton =
-    document.getElementById("generateButton");
-
-const playButton =
-    document.getElementById("playButton");
-
-const binaryPreview =
-    document.getElementById("binaryPreview");
-
-const dataSize =
-    document.getElementById("dataSize");
-
-const encodedSize =
-    document.getElementById("encodedSize");
-
-const duration =
-    document.getElementById("duration");
-
-const progress =
-    document.getElementById("progress");
-
-const progressPercent =
-    document.getElementById("progressPercent");
-
-const transmissionStatus =
-    document.getElementById("transmissionStatus");
-
-const transmitterStatus =
-    document.getElementById("transmitterStatus");
-
-const waveformCanvas =
-    document.getElementById("waveformCanvas");
-
-const waveformText =
-    document.getElementById("waveformText");
-
-
-let selectedFile = null;
-
-let generatedAudio = null;
-
-let audioContext = null;
-
-let audioBuffer = null;
-
-let audioSource = null;
-
-
-/*
-    AUDIO SETTINGS
-*/
-
 const SAMPLE_RATE = 44100;
 
 /*
-    Two frequencies represent 0 and 1.
+ * SONICCRYPT TURBO
+ *
+ * 16 different frequencies.
+ * Each frequency represents one hexadecimal value:
+ *
+ * 0 = 1000 Hz
+ * 1 = 1200 Hz
+ * 2 = 1400 Hz
+ * ...
+ * F = 4000 Hz
+ */
 
-    These are intentionally separated enough
-    to make the first prototype easier to decode.
-*/
-
-const FREQUENCY_0 = 1200;
-const FREQUENCY_1 = 2200;
-
-/*
-    Number of audio samples used for each bit.
-
-    Larger values = slower transmission
-    but easier decoding.
-*/
-
-const BIT_DURATION = 0.025;
-
-
-/*
-    FILE SELECTION
-*/
-
-uploadArea.addEventListener(
-    "click",
-    () => fileInput.click()
+const FREQUENCIES = Array.from(
+    { length: 16 },
+    (_, i) => 1000 + i * 200
 );
 
+const MODES = {
+    turbo: 0.003,
+    reliable: 0.006
+};
 
-fileInput.addEventListener(
-    "change",
-    () => {
+let currentMode = "turbo";
 
-        if (!fileInput.files.length) {
-            return;
-        }
+let selectedFile = null;
+let transmissionBytes = [];
+let transmissionSymbols = [];
 
-        loadFile(fileInput.files[0]);
+let audioBuffer = null;
+let audioContext = null;
+let sourceNode = null;
+
+let isPlaying = false;
+let isPaused = false;
+
+let transmissionStart = 0;
+let pausedAt = 0;
+let animationFrame = null;
+
+
+/* ELEMENTS */
+
+const fileInput = document.getElementById("fileInput");
+const fileInfo = document.getElementById("fileInfo");
+
+const imagePreview = document.getElementById("imagePreview");
+const previewContainer = document.getElementById("previewContainer");
+
+const statusElement = document.getElementById("status");
+
+const elapsedTime = document.getElementById("elapsedTime");
+const remainingTime = document.getElementById("remainingTime");
+const totalTime = document.getElementById("totalTime");
+
+const progressFill = document.getElementById("progressFill");
+const progressPercent = document.getElementById("progressPercent");
+
+const playButton = document.getElementById("playButton");
+const pauseButton = document.getElementById("pauseButton");
+const stopButton = document.getElementById("stopButton");
+
+const dataSize = document.getElementById("dataSize");
+const encodedBits = document.getElementById("encodedBits");
+const symbolCount = document.getElementById("symbolCount");
+const symbolSpeed = document.getElementById("symbolSpeed");
+
+const canvas = document.getElementById("waveformCanvas");
+const ctx = canvas.getContext("2d");
+
+const logElement = document.getElementById("log");
+
+const turboButton = document.getElementById("turboMode");
+const reliableButton = document.getElementById("reliableMode");
+
+const modeInfo = document.getElementById("modeInfo");
+
+
+/* LOG */
+
+function log(message) {
+
+    const entry = document.createElement("div");
+
+    entry.className = "log-entry";
+
+    entry.innerHTML =
+        `<span class="log-time">[${new Date().toLocaleTimeString()}]</span> ${message}`;
+
+    logElement.appendChild(entry);
+
+    logElement.scrollTop = logElement.scrollHeight;
+}
+
+
+/* MODE */
+
+turboButton.onclick = () => setMode("turbo");
+
+reliableButton.onclick = () => setMode("reliable");
+
+function setMode(mode) {
+
+    if (isPlaying || isPaused) {
+        return;
     }
-);
 
+    currentMode = mode;
 
-/*
-    DRAG AND DROP
-*/
+    turboButton.classList.toggle("active", mode === "turbo");
+    reliableButton.classList.toggle("active", mode === "reliable");
 
-uploadArea.addEventListener(
-    "dragover",
-    (event) => {
+    if (mode === "turbo") {
 
-        event.preventDefault();
+        modeInfo.textContent =
+            "TURBO: 3 ms symbols. Maximum speed. Best with short distance and low noise.";
 
-        uploadArea.classList.add("dragging");
+    } else {
+
+        modeInfo.textContent =
+            "RELIABLE: 6 ms symbols. Slower but easier for the receiver to detect.";
     }
-);
 
-
-uploadArea.addEventListener(
-    "dragleave",
-    () => {
-
-        uploadArea.classList.remove("dragging");
+    if (selectedFile) {
+        prepareTransmission(selectedFile);
     }
-);
+}
 
 
-uploadArea.addEventListener(
-    "drop",
-    (event) => {
+/* FILE */
 
-        event.preventDefault();
+fileInput.addEventListener("change", async () => {
 
-        uploadArea.classList.remove("dragging");
+    const file = fileInput.files[0];
 
-        const file = event.dataTransfer.files[0];
-
-        if (!file) {
-            return;
-        }
-
-        if (!file.type.startsWith("image/")) {
-            alert("Please select an image.");
-            return;
-        }
-
-        loadFile(file);
+    if (!file) {
+        return;
     }
-);
 
-
-/*
-    LOAD IMAGE
-*/
-
-function loadFile(file) {
+    stopTransmission();
 
     selectedFile = file;
 
-    fileName.textContent =
-        file.name;
-
-    fileSize.textContent =
-        formatBytes(file.size);
+    fileInfo.textContent =
+        `${file.name} — ${formatBytes(file.size)}`;
 
     dataSize.textContent =
         formatBytes(file.size);
 
-    const objectURL =
-        URL.createObjectURL(file);
+    if (file.type.startsWith("image/")) {
 
-    imagePreview.src =
-        objectURL;
+        const url = URL.createObjectURL(file);
 
-    uploadArea.hidden = true;
+        imagePreview.src = url;
 
-    previewContainer.hidden = false;
+        previewContainer.style.display = "block";
 
-    generateButton.disabled = false;
+    } else {
 
-    transmissionStatus.textContent =
-        "DATA LOADED";
+        previewContainer.style.display = "none";
+    }
 
-    transmitterStatus.textContent =
-        "READY";
+    log(`Selected: ${file.name}`);
 
-    binaryPreview.textContent =
-        "READY TO ENCODE";
+    await prepareTransmission(file);
+});
+
+
+/* PREPARE */
+
+async function prepareTransmission(file) {
+
+    statusElement.textContent = "ENCODING";
+
+    const buffer = await file.arrayBuffer();
+
+    const bytes = new Uint8Array(buffer);
+
+    /*
+     * Build the complete SONICCRYPT frame.
+     */
+
+    const frame = buildFrame(
+        bytes,
+        file.name,
+        file.type || "application/octet-stream"
+    );
+
+    transmissionBytes = frame;
+
+    /*
+     * Convert every byte to:
+     *
+     * 5 random bits
+     * +
+     * 8 data bits
+     */
+
+    const payloadBits =
+        encodeCustomBits(bytes);
+
+    /*
+     * Header is transmitted normally.
+     * Payload uses our custom 13-bit protocol.
+     */
+
+    const headerBytes =
+        buildHeader(
+            file.name,
+            file.type || "application/octet-stream",
+            bytes.length,
+            crc32(bytes)
+        );
+
+    const headerBits =
+        bytesToBits(headerBytes);
+
+    const allBits = [
+        ...headerBits,
+        ...payloadBits
+    ];
+
+    /*
+     * Convert 4 bits into one frequency symbol.
+     */
+
+    transmissionSymbols =
+        bitsToSymbols(allBits);
+
+    const duration =
+        transmissionSymbols.length *
+        MODES[currentMode];
+
+    encodedBits.textContent =
+        allBits.length.toLocaleString();
+
+    symbolCount.textContent =
+        transmissionSymbols.length.toLocaleString();
+
+    symbolSpeed.textContent =
+        `${Math.round(1 / MODES[currentMode])}/sec`;
+
+    totalTime.textContent =
+        formatTime(duration);
+
+    remainingTime.textContent =
+        formatTime(duration);
+
+    elapsedTime.textContent =
+        "00:00";
+
+    progressFill.style.width = "0%";
+    progressPercent.textContent = "0%";
+
+    log(`File: ${file.name}`);
+    log(`Original size: ${bytes.length.toLocaleString()} bytes`);
+    log(`Encoded bits: ${allBits.length.toLocaleString()}`);
+    log(`Symbols: ${transmissionSymbols.length.toLocaleString()}`);
+    log(`Estimated time: ${formatTime(duration)}`);
+
+    statusElement.textContent = "GENERATING AUDIO";
+
+    audioBuffer =
+        createAudioBuffer(transmissionSymbols);
+
+    drawWaveform(audioBuffer);
+
+    statusElement.textContent = "READY";
+
+    playButton.disabled = false;
+    pauseButton.disabled = true;
+    stopButton.disabled = true;
 }
 
 
 /*
-    REMOVE FILE
-*/
+ * Kept as a separate function so the protocol
+ * can be expanded later.
+ */
+function buildFrame(bytes, name, mime) {
 
-removeFile.addEventListener(
-    "click",
-    () => {
+    return Array.from(bytes);
+}
 
-        selectedFile = null;
 
-        fileInput.value = "";
+/* HEADER */
 
-        previewContainer.hidden = true;
+function buildHeader(name, mime, fileSize, checksum) {
 
-        uploadArea.hidden = false;
+    const encoder = new TextEncoder();
 
-        generateButton.disabled = true;
+    const nameBytes =
+        encoder.encode(name);
 
-        playButton.disabled = true;
+    const mimeBytes =
+        encoder.encode(mime);
 
-        binaryPreview.textContent =
-            "WAITING FOR DATA...";
+    const result = [];
 
-        transmissionStatus.textContent =
-            "READY";
+    /*
+     * MAGIC
+     */
 
-        transmitterStatus.textContent =
-            "STANDBY";
+    result.push(
+        0x53, // S
+        0x43, // C
+        0x58, // X
+        0x31  // 1
+    );
 
-        dataSize.textContent =
-            "0 KB";
+    /*
+     * VERSION
+     */
 
-        encodedSize.textContent =
-            "0 KB";
+    result.push(1);
 
-        duration.textContent =
-            "0.0 SEC";
+    /*
+     * NAME LENGTH
+     */
 
-        progress.style.width =
-            "0%";
+    result.push(
+        (nameBytes.length >> 8) & 0xff,
+        nameBytes.length & 0xff
+    );
 
-        progressPercent.textContent =
-            "0%";
+    result.push(...nameBytes);
 
-        clearWaveform();
-    }
-);
+    /*
+     * MIME LENGTH
+     */
 
+    result.push(
+        (mimeBytes.length >> 8) & 0xff,
+        mimeBytes.length & 0xff
+    );
 
-/*
-    GENERATE AUDIO
-*/
+    result.push(...mimeBytes);
 
-generateButton.addEventListener(
-    "click",
-    async () => {
+    /*
+     * FILE SIZE
+     */
 
-        if (!selectedFile) {
-            return;
-        }
+    result.push(
+        (fileSize >>> 24) & 0xff,
+        (fileSize >>> 16) & 0xff,
+        (fileSize >>> 8) & 0xff,
+        fileSize & 0xff
+    );
 
-        generateButton.disabled = true;
+    /*
+     * CRC32
+     */
 
-        playButton.disabled = true;
+    result.push(
+        (checksum >>> 24) & 0xff,
+        (checksum >>> 16) & 0xff,
+        (checksum >>> 8) & 0xff,
+        checksum & 0xff
+    );
 
-        transmitterStatus.textContent =
-            "ENCODING";
+    return new Uint8Array(result);
+}
 
-        transmissionStatus.textContent =
-            "PROCESSING";
 
-        progress.style.width =
-            "0%";
+/* CUSTOM 13-BIT PROTOCOL */
 
-        progressPercent.textContent =
-            "0%";
-
-        try {
-
-            const bytes =
-                new Uint8Array(
-                    await selectedFile.arrayBuffer()
-                );
-
-
-            /*
-                CREATE CUSTOM 5-BIT PROTOCOL
-            */
-
-            const encodedBits =
-                createSonicCryptBits(bytes);
-
-
-            /*
-                SHOW A SMALL PREVIEW
-            */
-
-            binaryPreview.textContent =
-                encodedBits
-                    .slice(0, 130)
-                    .join("");
-
-
-            encodedSize.textContent =
-                formatBytes(
-                    encodedBits.length / 8
-                );
-
-
-            /*
-                GENERATE AUDIO
-            */
-
-            audioBuffer =
-                createAudioBuffer(encodedBits);
-
-
-            duration.textContent =
-                audioBuffer.duration.toFixed(2)
-                + " SEC";
-
-
-            /*
-                DRAW VISUAL WAVEFORM
-            */
-
-            drawWaveform(audioBuffer);
-
-
-            transmitterStatus.textContent =
-                "READY";
-
-            transmissionStatus.textContent =
-                "AUDIO READY";
-
-            progress.style.width =
-                "100%";
-
-            progressPercent.textContent =
-                "100%";
-
-            playButton.disabled = false;
-
-        }
-        catch (error) {
-
-            console.error(error);
-
-            transmitterStatus.textContent =
-                "ERROR";
-
-            transmissionStatus.textContent =
-                "ENCODING FAILED";
-
-            alert(
-                "Could not generate the audio transmission."
-            );
-
-        }
-        finally {
-
-            generateButton.disabled = false;
-        }
-    }
-);
-
-
-/*
-    CUSTOM SONICCRYPT ENCODING
-
-    Every original byte becomes:
-
-        [5 random bits][8 data bits]
-
-    Example:
-
-        random = 10110
-        data   = 01001111
-
-        result =
-
-        10110 01001111
-
-    Total = 13 bits
-*/
-
-
-function createSonicCryptBits(bytes) {
+function encodeCustomBits(bytes) {
 
     const bits = [];
 
     for (const byte of bytes) {
 
         /*
-            Generate five random bits.
-        */
+         * Five random bits.
+         */
 
         const randomBits =
             new Uint8Array(5);
 
-        crypto.getRandomValues(
-            randomBits
-        );
-
-
-        /*
-            Add the random five bits.
-        */
+        crypto.getRandomValues(randomBits);
 
         for (let i = 0; i < 5; i++) {
-
-            bits.push(
-                randomBits[i] & 1
-            );
+            bits.push(randomBits[i] & 1);
         }
 
-
         /*
-            Add the original 8 data bits.
-        */
+         * Eight actual data bits.
+         */
 
         for (let i = 7; i >= 0; i--) {
-
-            bits.push(
-                (byte >> i) & 1
-            );
+            bits.push((byte >> i) & 1);
         }
     }
 
@@ -449,197 +398,541 @@ function createSonicCryptBits(bytes) {
 }
 
 
-/*
-    CREATE AUDIO BUFFER
-*/
+/* BYTES -> BITS */
 
-function createAudioBuffer(bits) {
+function bytesToBits(bytes) {
 
-    const samplesPerBit =
+    const bits = [];
+
+    for (const byte of bytes) {
+
+        for (let i = 7; i >= 0; i--) {
+            bits.push((byte >> i) & 1);
+        }
+    }
+
+    return bits;
+}
+
+
+/* BITS -> 4-BIT SYMBOLS */
+
+function bitsToSymbols(bits) {
+
+    const symbols = [];
+
+    for (let i = 0; i < bits.length; i += 4) {
+
+        let value = 0;
+
+        for (let j = 0; j < 4; j++) {
+
+            value <<= 1;
+
+            if (i + j < bits.length) {
+                value |= bits[i + j];
+            }
+        }
+
+        symbols.push(value);
+    }
+
+    return symbols;
+}
+
+
+/* AUDIO */
+
+function createAudioBuffer(symbols) {
+
+    const symbolDuration =
+        MODES[currentMode];
+
+    const samplesPerSymbol =
         Math.floor(
-            SAMPLE_RATE * BIT_DURATION
+            SAMPLE_RATE * symbolDuration
         );
 
     const totalSamples =
-        bits.length * samplesPerBit;
+        samplesPerSymbol * symbols.length;
 
-
-    const buffer =
-        new AudioContext({
-            sampleRate: SAMPLE_RATE
-        }).createBuffer(
+    const offline =
+        new OfflineAudioContext(
             1,
             totalSamples,
             SAMPLE_RATE
         );
 
+    const buffer =
+        offline.createBuffer(
+            1,
+            totalSamples,
+            SAMPLE_RATE
+        );
 
     const channel =
         buffer.getChannelData(0);
 
+    let index = 0;
 
-    let position = 0;
-
-
-    for (const bit of bits) {
+    for (const symbol of symbols) {
 
         const frequency =
-            bit === 0
-                ? FREQUENCY_0
-                : FREQUENCY_1;
-
+            FREQUENCIES[symbol];
 
         for (
             let i = 0;
-            i < samplesPerBit;
+            i < samplesPerSymbol;
             i++
         ) {
-
-            /*
-                Time inside this bit.
-            */
 
             const time =
                 i / SAMPLE_RATE;
 
-
             /*
-                Generate sine wave.
-            */
+             * Short fade prevents clicks.
+             */
 
-            let sample =
+            const fadeSamples =
+                Math.min(
+                    100,
+                    Math.floor(samplesPerSymbol / 5)
+                );
+
+            let envelope = 1;
+
+            if (i < fadeSamples) {
+
+                envelope =
+                    i / fadeSamples;
+
+            } else if (
+                i > samplesPerSymbol - fadeSamples
+            ) {
+
+                envelope =
+                    (samplesPerSymbol - i) /
+                    fadeSamples;
+            }
+
+            channel[index++] =
                 Math.sin(
                     2 *
                     Math.PI *
                     frequency *
                     time
-                );
-
-
-            /*
-                Fade in/out each bit.
-
-                This reduces clicking between tones.
-            */
-
-            const fadeLength =
-                Math.min(
-                    samplesPerBit * 0.08,
-                    100
-                );
-
-
-            if (i < fadeLength) {
-
-                sample *=
-                    i / fadeLength;
-
-            }
-            else if (
-                i >
-                samplesPerBit - fadeLength
-            ) {
-
-                sample *=
-                    (
-                        samplesPerBit - i
-                    ) / fadeLength;
-            }
-
-
-            channel[position++] =
-                sample * 0.35;
+                ) *
+                0.35 *
+                envelope;
         }
     }
-
 
     return buffer;
 }
 
 
-/*
-    PLAY AUDIO
-*/
+/* PLAY */
 
-playButton.addEventListener(
-    "click",
-    async () => {
+playButton.onclick = async () => {
 
-        if (!audioBuffer) {
-            return;
+    if (!audioBuffer) {
+        return;
+    }
+
+    if (isPaused) {
+
+        await resumeTransmission();
+
+    } else {
+
+        await startTransmission();
+    }
+};
+
+
+async function startTransmission() {
+
+    stopAudioOnly();
+
+    audioContext =
+        new AudioContext({
+            sampleRate: SAMPLE_RATE
+        });
+
+    await audioContext.resume();
+
+    sourceNode =
+        audioContext.createBufferSource();
+
+    sourceNode.buffer =
+        audioBuffer;
+
+    sourceNode.connect(
+        audioContext.destination
+    );
+
+    sourceNode.onended = () => {
+
+        if (isPlaying) {
+            finishTransmission();
         }
+    };
+
+    sourceNode.start();
+
+    transmissionStart =
+        audioContext.currentTime;
+
+    pausedAt = 0;
+
+    isPlaying = true;
+    isPaused = false;
+
+    statusElement.textContent =
+        "TRANSMITTING";
+
+    playButton.disabled = true;
+    pauseButton.disabled = false;
+    stopButton.disabled = false;
+
+    log("Transmission started.");
+
+    updateTimer();
+}
 
 
-        if (audioSource) {
+/* PAUSE */
 
-            try {
-                audioSource.stop();
-            }
-            catch {}
-        }
+pauseButton.onclick = async () => {
 
+    if (!audioContext || !isPlaying) {
+        return;
+    }
 
-        if (!audioContext) {
+    pausedAt =
+        audioContext.currentTime -
+        transmissionStart;
 
-            audioContext =
-                new AudioContext();
-        }
+    await audioContext.suspend();
 
+    isPlaying = false;
+    isPaused = true;
 
-        /*
-            Some browsers require
-            AudioContext to be resumed
-            after user interaction.
-        */
+    statusElement.textContent =
+        "PAUSED";
 
-        if (
-            audioContext.state ===
-            "suspended"
-        ) {
+    playButton.textContent =
+        "RESUME";
 
-            await audioContext.resume();
-        }
+    playButton.disabled = false;
+    pauseButton.disabled = true;
 
-
-        audioSource =
-            audioContext.createBufferSource();
+    log("Transmission paused.");
+};
 
 
-        audioSource.buffer =
-            audioBuffer;
+/* RESUME */
+
+async function resumeTransmission() {
+
+    await audioContext.resume();
+
+    transmissionStart =
+        audioContext.currentTime -
+        pausedAt;
+
+    isPlaying = true;
+    isPaused = false;
+
+    statusElement.textContent =
+        "TRANSMITTING";
+
+    playButton.disabled = true;
+    pauseButton.disabled = false;
+
+    log("Transmission resumed.");
+
+    updateTimer();
+}
 
 
-        audioSource.connect(
-            audioContext.destination
+/* STOP */
+
+stopButton.onclick = () => {
+    stopTransmission();
+};
+
+
+function stopTransmission() {
+
+    stopAudioOnly();
+
+    isPlaying = false;
+    isPaused = false;
+
+    pausedAt = 0;
+
+    cancelAnimationFrame(animationFrame);
+
+    const duration =
+        audioBuffer
+            ? audioBuffer.duration
+            : 0;
+
+    elapsedTime.textContent = "00:00";
+
+    remainingTime.textContent =
+        formatTime(duration);
+
+    progressFill.style.width = "0%";
+    progressPercent.textContent = "0%";
+
+    statusElement.textContent =
+        audioBuffer ? "READY" : "WAITING FOR FILE";
+
+    playButton.textContent = "PLAY";
+
+    playButton.disabled =
+        !audioBuffer;
+
+    pauseButton.disabled = true;
+    stopButton.disabled = true;
+
+    log("Transmission stopped.");
+}
+
+
+function stopAudioOnly() {
+
+    if (sourceNode) {
+
+        try {
+            sourceNode.stop();
+        } catch {}
+
+        sourceNode.disconnect();
+
+        sourceNode = null;
+    }
+
+    if (audioContext) {
+
+        audioContext.close();
+
+        audioContext = null;
+    }
+}
+
+
+/* FINISH */
+
+function finishTransmission() {
+
+    isPlaying = false;
+    isPaused = false;
+
+    cancelAnimationFrame(animationFrame);
+
+    statusElement.textContent =
+        "TRANSMISSION COMPLETE";
+
+    playButton.disabled = false;
+    pauseButton.disabled = true;
+    stopButton.disabled = true;
+
+    progressFill.style.width = "100%";
+    progressPercent.textContent = "100%";
+
+    elapsedTime.textContent =
+        formatTime(audioBuffer.duration);
+
+    remainingTime.textContent =
+        "00:00";
+
+    log("Transmission complete.");
+
+    if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+    }
+
+    sourceNode = null;
+}
+
+
+/* TIMER */
+
+function updateTimer() {
+
+    if (!isPlaying || !audioContext) {
+        return;
+    }
+
+    const elapsed =
+        audioContext.currentTime -
+        transmissionStart;
+
+    const total =
+        audioBuffer.duration;
+
+    const progress =
+        Math.min(
+            1,
+            elapsed / total
         );
 
+    elapsedTime.textContent =
+        formatTime(elapsed);
 
-        audioSource.onended =
-            () => {
+    remainingTime.textContent =
+        formatTime(
+            Math.max(
+                0,
+                total - elapsed
+            )
+        );
 
-                transmitterStatus.textContent =
-                    "READY";
+    progressFill.style.width =
+        `${progress * 100}%`;
 
-                transmissionStatus.textContent =
-                    "TRANSMISSION COMPLETE";
-            };
+    progressPercent.textContent =
+        `${Math.floor(progress * 100)}%`;
 
-
-        transmitterStatus.textContent =
-            "TRANSMITTING";
-
-        transmissionStatus.textContent =
-            "PLAYING";
+    animationFrame =
+        requestAnimationFrame(
+            updateTimer
+        );
+}
 
 
-        audioSource.start();
+/* WAVEFORM */
+
+function drawWaveform(buffer) {
+
+    canvas.width =
+        canvas.clientWidth *
+        window.devicePixelRatio;
+
+    canvas.height =
+        canvas.clientHeight *
+        window.devicePixelRatio;
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    const data =
+        buffer.getChannelData(0);
+
+    const center =
+        canvas.height / 2;
+
+    const step =
+        Math.max(
+            1,
+            Math.floor(
+                data.length /
+                canvas.width
+            )
+        );
+
+    ctx.beginPath();
+
+    for (
+        let x = 0;
+        x < canvas.width;
+        x++
+    ) {
+
+        const value =
+            data[x * step] || 0;
+
+        const y =
+            center +
+            value *
+            center *
+            0.85;
+
+        if (x === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
     }
-);
+
+    ctx.strokeStyle = "#4aa8ff";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
 
 
-/*
-    FORMAT FILE SIZE
-*/
+/* CRC32 */
+
+function crc32(bytes) {
+
+    let crc = 0xffffffff;
+
+    for (const byte of bytes) {
+
+        crc ^= byte;
+
+        for (let i = 0; i < 8; i++) {
+
+            crc =
+                (crc >>> 1) ^
+                (
+                    -(crc & 1) &
+                    0xedb88320
+                );
+        }
+    }
+
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
+
+/* FORMAT */
+
+function formatTime(seconds) {
+
+    seconds =
+        Math.max(
+            0,
+            Math.floor(seconds)
+        );
+
+    const hours =
+        Math.floor(seconds / 3600);
+
+    const minutes =
+        Math.floor(
+            (seconds % 3600) / 60
+        );
+
+    const secs =
+        seconds % 60;
+
+    if (hours > 0) {
+
+        return (
+            String(hours).padStart(2, "0") +
+            ":" +
+            String(minutes).padStart(2, "0") +
+            ":" +
+            String(secs).padStart(2, "0")
+        );
+    }
+
+    return (
+        String(minutes).padStart(2, "0") +
+        ":" +
+        String(secs).padStart(2, "0")
+    );
+}
+
 
 function formatBytes(bytes) {
 
@@ -661,130 +954,23 @@ function formatBytes(bytes) {
         );
 
     return (
-        (bytes /
-        Math.pow(1024, index))
-            .toFixed(2)
+        (
+            bytes /
+            Math.pow(1024, index)
+        ).toFixed(
+            index === 0 ? 0 : 2
+        )
         + " "
         + units[index]
     );
 }
 
 
-/*
-    DRAW WAVEFORM
-*/
+/* INITIAL */
 
-function drawWaveform(buffer) {
+playButton.disabled = true;
+pauseButton.disabled = true;
+stopButton.disabled = true;
 
-    const canvas =
-        waveformCanvas;
-
-    const ctx =
-        canvas.getContext("2d");
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-    canvas.width =
-        rect.width * devicePixelRatio;
-
-    canvas.height =
-        rect.height * devicePixelRatio;
-
-    ctx.scale(
-        devicePixelRatio,
-        devicePixelRatio
-    );
-
-
-    const width =
-        rect.width;
-
-    const height =
-        rect.height;
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    const data =
-        buffer.getChannelData(0);
-
-
-    const step =
-        Math.max(
-            1,
-            Math.floor(
-                data.length / width
-            )
-        );
-
-
-    ctx.beginPath();
-
-
-    for (
-        let x = 0;
-        x < width;
-        x++
-    ) {
-
-        const index =
-            x * step;
-
-        const value =
-            data[index] || 0;
-
-
-        const y =
-            height / 2 +
-            value * height * 0.8;
-
-
-        if (x === 0) {
-            ctx.moveTo(x, y);
-        }
-        else {
-            ctx.lineTo(x, y);
-        }
-    }
-
-
-    ctx.strokeStyle =
-        "#42e8a4";
-
-    ctx.lineWidth =
-        1;
-
-    ctx.stroke();
-
-
-    waveformText.style.display =
-        "none";
-}
-
-
-/*
-    CLEAR WAVEFORM
-*/
-
-function clearWaveform() {
-
-    const ctx =
-        waveformCanvas
-            .getContext("2d");
-
-    ctx.clearRect(
-        0,
-        0,
-        waveformCanvas.width,
-        waveformCanvas.height
-    );
-
-    waveformText.style.display =
-        "flex";
-}
+log("SONICCRYPT TURBO transmitter initialized.");
+log("16-FSK acoustic protocol loaded.");
