@@ -3,175 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SONICCRYPT TRANSMITTER</title>
+
+    <title>SONICCRYPT | Sender</title>
+
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-<div class="container">
+    <div class="background-grid"></div>
 
-    <header>
-        <div class="logo">SONICCRYPT</div>
-        <div class="subtitle">TURBO ACOUSTIC DATA TRANSMITTER</div>
-    </header>
+    <main class="container">
 
-    <main>
+        <header>
+            <div class="logo">SONICCRYPT</div>
+            <div class="subtitle">ACOUSTIC DATA TRANSMISSION</div>
+        </header>
 
-        <section class="panel">
+        <section class="card">
 
-            <h2>FILE</h2>
+            <div class="section-title">
+                TRANSMISSION TEST
+            </div>
 
-            <label class="upload-box">
-                <input type="file" id="fileInput">
-                <span>SELECT FILE</span>
+            <label for="message">
+                MESSAGE
             </label>
 
-            <div id="fileInfo" class="file-info">
-                No file selected
+            <textarea
+                id="message"
+                maxlength="255"
+                placeholder="Enter a message..."
+            >HELLO SONICCRYPT</textarea>
+
+            <div class="message-info">
+                Maximum 255 bytes
             </div>
 
-            <div id="previewContainer" class="preview-container">
-                <img id="imagePreview" alt="Preview">
+            <button id="sendButton">
+                SEND MESSAGE
+            </button>
+
+            <button id="stopButton" class="secondary" disabled>
+                STOP
+            </button>
+
+        </section>
+
+        <section class="card">
+
+            <div class="section-title">
+                TRANSMISSION STATUS
+            </div>
+
+            <div class="status-box" id="status">
+                READY
+            </div>
+
+            <div class="stats">
+
+                <div class="stat">
+                    <span class="stat-label">PROTOCOL</span>
+                    <span class="stat-value">2-FSK</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-label">BIT 0</span>
+                    <span class="stat-value">1200 Hz</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-label">BIT 1</span>
+                    <span class="stat-value">2400 Hz</span>
+                </div>
+
+                <div class="stat">
+                    <span class="stat-label">SYMBOL</span>
+                    <span class="stat-value">100 ms</span>
+                </div>
+
+            </div>
+
+            <div class="progress-container">
+                <div id="progressBar"></div>
+            </div>
+
+            <div id="progressText">
+                0%
             </div>
 
         </section>
 
+        <section class="card log-card">
 
-        <section class="panel">
-
-            <h2>TRANSMISSION MODE</h2>
-
-            <div class="mode-grid">
-
-                <button id="turboMode" class="mode-button active">
-                    TURBO
-                    <small>3 ms / symbol</small>
-                </button>
-
-                <button id="reliableMode" class="mode-button">
-                    RELIABLE
-                    <small>6 ms / symbol</small>
-                </button>
-
+            <div class="section-title">
+                TRANSMITTER LOG
             </div>
-
-            <div class="mode-info" id="modeInfo">
-                TURBO: maximum speed. Best with short distance and low noise.
-            </div>
-
-        </section>
-
-
-        <section class="panel">
-
-            <h2>TRANSMISSION</h2>
-
-            <div id="status" class="status">
-                WAITING FOR FILE
-            </div>
-
-
-            <div class="timer-grid">
-
-                <div class="timer-box">
-                    <span>ELAPSED</span>
-                    <strong id="elapsedTime">00:00</strong>
-                </div>
-
-                <div class="timer-box">
-                    <span>REMAINING</span>
-                    <strong id="remainingTime">00:00</strong>
-                </div>
-
-                <div class="timer-box">
-                    <span>TOTAL</span>
-                    <strong id="totalTime">00:00</strong>
-                </div>
-
-            </div>
-
-
-            <div class="progress-info">
-                <span>PROGRESS</span>
-                <strong id="progressPercent">0%</strong>
-            </div>
-
-            <div class="progress-bar">
-                <div id="progressFill"></div>
-            </div>
-
-
-            <div class="controls">
-
-                <button id="playButton" disabled>
-                    PLAY
-                </button>
-
-                <button id="pauseButton" disabled>
-                    PAUSE
-                </button>
-
-                <button id="stopButton" disabled>
-                    STOP
-                </button>
-
-            </div>
-
-
-            <div class="details">
-
-                <div>
-                    <span>FILE SIZE</span>
-                    <strong id="dataSize">0 B</strong>
-                </div>
-
-                <div>
-                    <span>DATA BITS</span>
-                    <strong id="encodedBits">0</strong>
-                </div>
-
-                <div>
-                    <span>SYMBOLS</span>
-                    <strong id="symbolCount">0</strong>
-                </div>
-
-                <div>
-                    <span>SYMBOL SPEED</span>
-                    <strong id="symbolSpeed">0</strong>
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <section class="panel">
-
-            <h2>SONIC WAVEFORM</h2>
-
-            <canvas id="waveformCanvas"></canvas>
-
-        </section>
-
-
-        <section class="panel">
-
-            <h2>TRANSMITTER LOG</h2>
 
             <div id="log"></div>
 
         </section>
 
+        <footer>
+            SONICCRYPT TEST PROTOCOL v1
+        </footer>
+
     </main>
 
-    <footer>
-        SONICCRYPT // 16-FSK // LOCAL ACOUSTIC TRANSFER
-    </footer>
-
-</div>
-
-<script src="script.js"></script>
+    <script src="script.js"></script>
 
 </body>
 </html>
