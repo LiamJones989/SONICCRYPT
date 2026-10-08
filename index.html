@@ -3,305 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>SONICCRYPT</title>
-
+    <title>SONICCRYPT TRANSMITTER</title>
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-    <div class="background-grid"></div>
+<div class="container">
 
-    <main class="app">
+    <header>
+        <div class="logo">SONICCRYPT</div>
+        <div class="subtitle">TURBO ACOUSTIC DATA TRANSMITTER</div>
+    </header>
 
-        <header class="header">
+    <main>
 
-            <div class="logo">
-                <div class="logo-symbol">S</div>
+        <section class="panel">
 
-                <div>
-                    <h1>SONICCRYPT</h1>
-                    <p>ACOUSTIC DATA TRANSMISSION</p>
-                </div>
+            <h2>FILE</h2>
+
+            <label class="upload-box">
+                <input type="file" id="fileInput">
+                <span>SELECT FILE</span>
+            </label>
+
+            <div id="fileInfo" class="file-info">
+                No file selected
             </div>
 
-            <div class="status">
-                <span class="status-dot"></span>
-                SYSTEM READY
-            </div>
-
-        </header>
-
-
-        <section class="hero">
-
-            <div class="hero-text">
-
-                <span class="tag">SECURE AUDIO PROTOCOL</span>
-
-                <h2>
-                    Transmit data
-                    <span>through sound.</span>
-                </h2>
-
-                <p>
-                    Convert images into encrypted binary data and transmit
-                    them acoustically using the SONICCRYPT protocol.
-                </p>
-
+            <div id="previewContainer" class="preview-container">
+                <img id="imagePreview" alt="Preview">
             </div>
 
         </section>
 
 
-        <section class="workspace">
+        <section class="panel">
 
-            <!-- UPLOAD PANEL -->
+            <h2>TRANSMISSION MODE</h2>
 
-            <div class="panel">
+            <div class="mode-grid">
 
-                <div class="panel-header">
-                    <div>
-                        <span class="panel-number">01</span>
-                        <h3>SELECT DATA</h3>
-                    </div>
+                <button id="turboMode" class="mode-button active">
+                    TURBO
+                    <small>3 ms / symbol</small>
+                </button>
 
-                    <span class="panel-status">INPUT</span>
-                </div>
-
-
-                <div
-                    class="upload-area"
-                    id="uploadArea"
-                >
-
-                    <input
-                        type="file"
-                        id="fileInput"
-                        accept="image/*"
-                        hidden
-                    >
-
-                    <div class="upload-icon">
-                        +
-                    </div>
-
-                    <h4>DROP IMAGE HERE</h4>
-
-                    <p>
-                        or click to browse your device
-                    </p>
-
-                    <span class="file-types">
-                        PNG / JPG / WEBP / GIF
-                    </span>
-
-                </div>
-
-
-                <div
-                    class="preview-container"
-                    id="previewContainer"
-                    hidden
-                >
-
-                    <img
-                        id="imagePreview"
-                        alt="Selected image"
-                    >
-
-                    <div class="file-info">
-
-                        <div>
-                            <span>FILE</span>
-                            <strong id="fileName">
-                                -
-                            </strong>
-                        </div>
-
-                        <div>
-                            <span>SIZE</span>
-                            <strong id="fileSize">
-                                -
-                            </strong>
-                        </div>
-
-                        <button
-                            id="removeFile"
-                            class="remove-button"
-                        >
-                            REMOVE
-                        </button>
-
-                    </div>
-
-                </div>
+                <button id="reliableMode" class="mode-button">
+                    RELIABLE
+                    <small>6 ms / symbol</small>
+                </button>
 
             </div>
 
-
-            <!-- PROTOCOL PANEL -->
-
-            <div class="panel">
-
-                <div class="panel-header">
-
-                    <div>
-                        <span class="panel-number">02</span>
-                        <h3>SONIC PROTOCOL</h3>
-                    </div>
-
-                    <span class="panel-status">ENCODER</span>
-
-                </div>
-
-
-                <div class="protocol-box">
-
-                    <div class="protocol-row">
-                        <span>DATA FORMAT</span>
-                        <strong>BINARY</strong>
-                    </div>
-
-                    <div class="protocol-row">
-                        <span>PADDING</span>
-                        <strong>5 BIT RANDOM</strong>
-                    </div>
-
-                    <div class="protocol-row">
-                        <span>BLOCK SIZE</span>
-                        <strong>13 BIT</strong>
-                    </div>
-
-                    <div class="protocol-row">
-                        <span>MODULATION</span>
-                        <strong>FSK</strong>
-                    </div>
-
-                    <div class="protocol-row">
-                        <span>CHANNEL</span>
-                        <strong>AUDIO</strong>
-                    </div>
-
-                </div>
-
-
-                <div class="binary-preview">
-
-                    <span>PROTOCOL PREVIEW</span>
-
-                    <code id="binaryPreview">
-                        WAITING FOR DATA...
-                    </code>
-
-                </div>
-
+            <div class="mode-info" id="modeInfo">
+                TURBO: maximum speed. Best with short distance and low noise.
             </div>
 
         </section>
 
 
-        <!-- AUDIO TRANSMITTER -->
+        <section class="panel">
 
-        <section class="transmitter panel">
+            <h2>TRANSMISSION</h2>
 
-            <div class="panel-header">
-
-                <div>
-                    <span class="panel-number">03</span>
-                    <h3>AUDIO TRANSMITTER</h3>
-                </div>
-
-                <span
-                    class="panel-status"
-                    id="transmitterStatus"
-                >
-                    STANDBY
-                </span>
-
+            <div id="status" class="status">
+                WAITING FOR FILE
             </div>
 
 
-            <div class="waveform">
+            <div class="timer-grid">
 
-                <canvas id="waveformCanvas"></canvas>
+                <div class="timer-box">
+                    <span>ELAPSED</span>
+                    <strong id="elapsedTime">00:00</strong>
+                </div>
 
-                <div
-                    class="waveform-overlay"
-                    id="waveformText"
-                >
-                    AUDIO SIGNAL NOT GENERATED
+                <div class="timer-box">
+                    <span>REMAINING</span>
+                    <strong id="remainingTime">00:00</strong>
+                </div>
+
+                <div class="timer-box">
+                    <span>TOTAL</span>
+                    <strong id="totalTime">00:00</strong>
                 </div>
 
             </div>
 
 
-            <div class="transmission-info">
+            <div class="progress-info">
+                <span>PROGRESS</span>
+                <strong id="progressPercent">0%</strong>
+            </div>
 
-                <div>
-                    <span>DATA</span>
-                    <strong id="dataSize">0 KB</strong>
-                </div>
-
-                <div>
-                    <span>ENCODED</span>
-                    <strong id="encodedSize">0 KB</strong>
-                </div>
-
-                <div>
-                    <span>DURATION</span>
-                    <strong id="duration">0.0 SEC</strong>
-                </div>
-
-                <div>
-                    <span>STATUS</span>
-                    <strong id="transmissionStatus">
-                        READY
-                    </strong>
-                </div>
-
+            <div class="progress-bar">
+                <div id="progressFill"></div>
             </div>
 
 
             <div class="controls">
 
-                <button
-                    id="generateButton"
-                    class="primary-button"
-                    disabled
-                >
-                    GENERATE AUDIO
+                <button id="playButton" disabled>
+                    PLAY
                 </button>
 
-                <button
-                    id="playButton"
-                    class="secondary-button"
-                    disabled
-                >
-                    PLAY TRANSMISSION
+                <button id="pauseButton" disabled>
+                    PAUSE
+                </button>
+
+                <button id="stopButton" disabled>
+                    STOP
                 </button>
 
             </div>
 
 
-            <div class="progress-container">
+            <div class="details">
 
-                <div class="progress-label">
-
-                    <span>TRANSMISSION PROGRESS</span>
-
-                    <span id="progressPercent">
-                        0%
-                    </span>
-
+                <div>
+                    <span>FILE SIZE</span>
+                    <strong id="dataSize">0 B</strong>
                 </div>
 
-                <div class="progress-bar">
-                    <div
-                        class="progress"
-                        id="progress"
-                    ></div>
+                <div>
+                    <span>DATA BITS</span>
+                    <strong id="encodedBits">0</strong>
+                </div>
+
+                <div>
+                    <span>SYMBOLS</span>
+                    <strong id="symbolCount">0</strong>
+                </div>
+
+                <div>
+                    <span>SYMBOL SPEED</span>
+                    <strong id="symbolSpeed">0</strong>
                 </div>
 
             </div>
@@ -309,21 +146,32 @@
         </section>
 
 
-        <footer>
+        <section class="panel">
 
-            <div>
-                SONICCRYPT PROTOCOL
-            </div>
+            <h2>SONIC WAVEFORM</h2>
 
-            <div>
-                LOCAL PROCESSING · NO AUTOMATIC UPLOADS
-            </div>
+            <canvas id="waveformCanvas"></canvas>
 
-        </footer>
+        </section>
+
+
+        <section class="panel">
+
+            <h2>TRANSMITTER LOG</h2>
+
+            <div id="log"></div>
+
+        </section>
 
     </main>
 
-    <script src="script.js"></script>
+    <footer>
+        SONICCRYPT // 16-FSK // LOCAL ACOUSTIC TRANSFER
+    </footer>
+
+</div>
+
+<script src="script.js"></script>
 
 </body>
 </html>
