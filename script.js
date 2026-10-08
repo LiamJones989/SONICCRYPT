@@ -3,14 +3,12 @@ const SAMPLE_RATE = 44100;
 /*
  * SONICCRYPT TURBO
  *
- * 16 different frequencies.
- * Each frequency represents one hexadecimal value:
+ * 16-FSK
  *
- * 0 = 1000 Hz
- * 1 = 1200 Hz
- * 2 = 1400 Hz
+ * 0  = 1000 Hz
+ * 1  = 1200 Hz
  * ...
- * F = 4000 Hz
+ * 15 = 4000 Hz
  */
 
 const FREQUENCIES = Array.from(
@@ -18,18 +16,48 @@ const FREQUENCIES = Array.from(
     (_, i) => 1000 + i * 200
 );
 
+
+/*
+ * TRANSMISSION SPEEDS
+ *
+ * 4 ms = fast
+ * 6 ms = reliable
+ */
+
 const MODES = {
-    turbo: 0.003,
+    turbo: 0.004,
     reliable: 0.006
 };
 
 let currentMode = "turbo";
 
+
+/*
+ * SYNCHRONIZATION
+ *
+ * Alternating extreme frequencies.
+ *
+ * 0 = 1000 Hz
+ * F = 4000 Hz
+ *
+ * This lets the receiver find the
+ * exact beginning of the transmission.
+ */
+
+const PREAMBLE = [];
+
+for (let i = 0; i < 32; i++) {
+    PREAMBLE.push(i % 2 === 0 ? 0 : 15);
+}
+
+
 let selectedFile = null;
+
 let transmissionBytes = [];
 let transmissionSymbols = [];
 
 let audioBuffer = null;
+
 let audioContext = null;
 let sourceNode = null;
 
@@ -38,68 +66,118 @@ let isPaused = false;
 
 let transmissionStart = 0;
 let pausedAt = 0;
+
 let animationFrame = null;
 
 
-/* ELEMENTS */
+/*
+ * ELEMENTS
+ */
 
-const fileInput = document.getElementById("fileInput");
-const fileInfo = document.getElementById("fileInfo");
+const fileInput =
+    document.getElementById("fileInput");
 
-const imagePreview = document.getElementById("imagePreview");
-const previewContainer = document.getElementById("previewContainer");
+const fileInfo =
+    document.getElementById("fileInfo");
 
-const statusElement = document.getElementById("status");
+const imagePreview =
+    document.getElementById("imagePreview");
 
-const elapsedTime = document.getElementById("elapsedTime");
-const remainingTime = document.getElementById("remainingTime");
-const totalTime = document.getElementById("totalTime");
+const previewContainer =
+    document.getElementById("previewContainer");
 
-const progressFill = document.getElementById("progressFill");
-const progressPercent = document.getElementById("progressPercent");
+const statusElement =
+    document.getElementById("status");
 
-const playButton = document.getElementById("playButton");
-const pauseButton = document.getElementById("pauseButton");
-const stopButton = document.getElementById("stopButton");
+const elapsedTime =
+    document.getElementById("elapsedTime");
 
-const dataSize = document.getElementById("dataSize");
-const encodedBits = document.getElementById("encodedBits");
-const symbolCount = document.getElementById("symbolCount");
-const symbolSpeed = document.getElementById("symbolSpeed");
+const remainingTime =
+    document.getElementById("remainingTime");
 
-const canvas = document.getElementById("waveformCanvas");
-const ctx = canvas.getContext("2d");
+const totalTime =
+    document.getElementById("totalTime");
 
-const logElement = document.getElementById("log");
+const progressFill =
+    document.getElementById("progressFill");
 
-const turboButton = document.getElementById("turboMode");
-const reliableButton = document.getElementById("reliableMode");
+const progressPercent =
+    document.getElementById("progressPercent");
 
-const modeInfo = document.getElementById("modeInfo");
+const playButton =
+    document.getElementById("playButton");
+
+const pauseButton =
+    document.getElementById("pauseButton");
+
+const stopButton =
+    document.getElementById("stopButton");
+
+const dataSize =
+    document.getElementById("dataSize");
+
+const encodedBits =
+    document.getElementById("encodedBits");
+
+const symbolCount =
+    document.getElementById("symbolCount");
+
+const symbolSpeed =
+    document.getElementById("symbolSpeed");
+
+const canvas =
+    document.getElementById("waveformCanvas");
+
+const ctx =
+    canvas.getContext("2d");
+
+const logElement =
+    document.getElementById("log");
+
+const turboButton =
+    document.getElementById("turboMode");
+
+const reliableButton =
+    document.getElementById("reliableMode");
+
+const modeInfo =
+    document.getElementById("modeInfo");
 
 
-/* LOG */
+/*
+ * LOG
+ */
 
 function log(message) {
 
-    const entry = document.createElement("div");
+    const entry =
+        document.createElement("div");
 
-    entry.className = "log-entry";
+    entry.className =
+        "log-entry";
 
     entry.innerHTML =
-        `<span class="log-time">[${new Date().toLocaleTimeString()}]</span> ${message}`;
+        `<span class="log-time">
+            [${new Date().toLocaleTimeString()}]
+        </span> ${message}`;
 
     logElement.appendChild(entry);
 
-    logElement.scrollTop = logElement.scrollHeight;
+    logElement.scrollTop =
+        logElement.scrollHeight;
 }
 
 
-/* MODE */
+/*
+ * MODE
+ */
 
-turboButton.onclick = () => setMode("turbo");
+turboButton.onclick =
+    () => setMode("turbo");
 
-reliableButton.onclick = () => setMode("reliable");
+reliableButton.onclick =
+    () => setMode("reliable");
+
 
 function setMode(mode) {
 
@@ -109,18 +187,25 @@ function setMode(mode) {
 
     currentMode = mode;
 
-    turboButton.classList.toggle("active", mode === "turbo");
-    reliableButton.classList.toggle("active", mode === "reliable");
+    turboButton.classList.toggle(
+        "active",
+        mode === "turbo"
+    );
+
+    reliableButton.classList.toggle(
+        "active",
+        mode === "reliable"
+    );
 
     if (mode === "turbo") {
 
         modeInfo.textContent =
-            "TURBO: 3 ms symbols. Maximum speed. Best with short distance and low noise.";
+            "TURBO: 4 ms symbols. Faster transmission.";
 
     } else {
 
         modeInfo.textContent =
-            "RELIABLE: 6 ms symbols. Slower but easier for the receiver to detect.";
+            "RELIABLE: 6 ms symbols. Better for noisy environments.";
     }
 
     if (selectedFile) {
@@ -129,69 +214,86 @@ function setMode(mode) {
 }
 
 
-/* FILE */
+/*
+ * FILE
+ */
 
-fileInput.addEventListener("change", async () => {
+fileInput.addEventListener(
+    "change",
+    async () => {
 
-    const file = fileInput.files[0];
+        const file =
+            fileInput.files[0];
 
-    if (!file) {
-        return;
+        if (!file) {
+            return;
+        }
+
+        stopTransmission();
+
+        selectedFile = file;
+
+        fileInfo.textContent =
+            `${file.name} — ${formatBytes(file.size)}`;
+
+        dataSize.textContent =
+            formatBytes(file.size);
+
+        if (file.type.startsWith("image/")) {
+
+            const url =
+                URL.createObjectURL(file);
+
+            imagePreview.src = url;
+
+            previewContainer.style.display =
+                "block";
+
+        } else {
+
+            previewContainer.style.display =
+                "none";
+        }
+
+        log(`Selected: ${file.name}`);
+
+        await prepareTransmission(file);
     }
-
-    stopTransmission();
-
-    selectedFile = file;
-
-    fileInfo.textContent =
-        `${file.name} — ${formatBytes(file.size)}`;
-
-    dataSize.textContent =
-        formatBytes(file.size);
-
-    if (file.type.startsWith("image/")) {
-
-        const url = URL.createObjectURL(file);
-
-        imagePreview.src = url;
-
-        previewContainer.style.display = "block";
-
-    } else {
-
-        previewContainer.style.display = "none";
-    }
-
-    log(`Selected: ${file.name}`);
-
-    await prepareTransmission(file);
-});
+);
 
 
-/* PREPARE */
+/*
+ * PREPARE
+ */
 
 async function prepareTransmission(file) {
 
-    statusElement.textContent = "ENCODING";
+    statusElement.textContent =
+        "ENCODING";
 
-    const buffer = await file.arrayBuffer();
+    const buffer =
+        await file.arrayBuffer();
 
-    const bytes = new Uint8Array(buffer);
+    const bytes =
+        new Uint8Array(buffer);
+
 
     /*
-     * Build the complete SONICCRYPT frame.
+     * HEADER
      */
 
-    const frame = buildFrame(
-        bytes,
-        file.name,
-        file.type || "application/octet-stream"
-    );
+    const header =
+        buildHeader(
+            file.name,
+            file.type ||
+                "application/octet-stream",
+            bytes.length,
+            crc32(bytes)
+        );
 
-    transmissionBytes = frame;
 
     /*
-     * Convert every byte to:
+     * PAYLOAD
      *
      * 5 random bits
      * +
@@ -201,37 +303,51 @@ async function prepareTransmission(file) {
     const payloadBits =
         encodeCustomBits(bytes);
 
+
     /*
-     * Header is transmitted normally.
-     * Payload uses our custom 13-bit protocol.
+     * HEADER BITS
      */
 
-    const headerBytes =
-        buildHeader(
-            file.name,
-            file.type || "application/octet-stream",
-            bytes.length,
-            crc32(bytes)
-        );
-
     const headerBits =
-        bytesToBits(headerBytes);
+        bytesToBits(header);
+
+
+    /*
+     * COMPLETE DATA
+     */
 
     const allBits = [
         ...headerBits,
         ...payloadBits
     ];
 
+
     /*
-     * Convert 4 bits into one frequency symbol.
+     * 4 BITS = 1 FREQUENCY
      */
 
-    transmissionSymbols =
+    const dataSymbols =
         bitsToSymbols(allBits);
+
+
+    /*
+     * ADD SYNC PREAMBLE
+     */
+
+    transmissionSymbols = [
+        ...PREAMBLE,
+        ...dataSymbols
+    ];
+
+
+    transmissionBytes =
+        Array.from(bytes);
+
 
     const duration =
         transmissionSymbols.length *
         MODES[currentMode];
+
 
     encodedBits.textContent =
         allBits.length.toLocaleString();
@@ -240,7 +356,9 @@ async function prepareTransmission(file) {
         transmissionSymbols.length.toLocaleString();
 
     symbolSpeed.textContent =
-        `${Math.round(1 / MODES[currentMode])}/sec`;
+        `${Math.round(
+            1 / MODES[currentMode]
+        )}/sec`;
 
     totalTime.textContent =
         formatTime(duration);
@@ -251,45 +369,91 @@ async function prepareTransmission(file) {
     elapsedTime.textContent =
         "00:00";
 
-    progressFill.style.width = "0%";
-    progressPercent.textContent = "0%";
+    progressFill.style.width =
+        "0%";
 
-    log(`File: ${file.name}`);
-    log(`Original size: ${bytes.length.toLocaleString()} bytes`);
-    log(`Encoded bits: ${allBits.length.toLocaleString()}`);
-    log(`Symbols: ${transmissionSymbols.length.toLocaleString()}`);
-    log(`Estimated time: ${formatTime(duration)}`);
+    progressPercent.textContent =
+        "0%";
 
-    statusElement.textContent = "GENERATING AUDIO";
+
+    log(
+        `File: ${file.name}`
+    );
+
+    log(
+        `Original size: ${bytes.length.toLocaleString()} bytes`
+    );
+
+    log(
+        `Payload bits: ${payloadBits.length.toLocaleString()}`
+    );
+
+    log(
+        `Header bytes: ${header.length}`
+    );
+
+    log(
+        `Total symbols: ${transmissionSymbols.length.toLocaleString()}`
+    );
+
+    log(
+        `Estimated time: ${formatTime(duration)}`
+    );
+
+
+    statusElement.textContent =
+        "GENERATING AUDIO";
+
 
     audioBuffer =
-        createAudioBuffer(transmissionSymbols);
+        createAudioBuffer(
+            transmissionSymbols
+        );
 
-    drawWaveform(audioBuffer);
 
-    statusElement.textContent = "READY";
+    drawWaveform(
+        audioBuffer
+    );
 
-    playButton.disabled = false;
-    pauseButton.disabled = true;
-    stopButton.disabled = true;
+
+    statusElement.textContent =
+        "READY";
+
+    playButton.disabled =
+        false;
+
+    pauseButton.disabled =
+        true;
+
+    stopButton.disabled =
+        true;
 }
 
 
 /*
- * Kept as a separate function so the protocol
- * can be expanded later.
+ * HEADER
+ *
+ * SCX2
+ *
+ * 4 magic bytes
+ * 1 version
+ * 2 name length
+ * name
+ * 2 MIME length
+ * MIME
+ * 4 file size
+ * 4 CRC32
  */
-function buildFrame(bytes, name, mime) {
 
-    return Array.from(bytes);
-}
+function buildHeader(
+    name,
+    mime,
+    fileSize,
+    checksum
+) {
 
-
-/* HEADER */
-
-function buildHeader(name, mime, fileSize, checksum) {
-
-    const encoder = new TextEncoder();
+    const encoder =
+        new TextEncoder();
 
     const nameBytes =
         encoder.encode(name);
@@ -299,48 +463,37 @@ function buildHeader(name, mime, fileSize, checksum) {
 
     const result = [];
 
-    /*
-     * MAGIC
-     */
 
     result.push(
-        0x53, // S
-        0x43, // C
-        0x58, // X
-        0x31  // 1
+        0x53,
+        0x43,
+        0x58,
+        0x32
     );
 
-    /*
-     * VERSION
-     */
 
-    result.push(1);
+    result.push(2);
 
-    /*
-     * NAME LENGTH
-     */
 
     result.push(
         (nameBytes.length >> 8) & 0xff,
         nameBytes.length & 0xff
     );
 
-    result.push(...nameBytes);
+    result.push(
+        ...nameBytes
+    );
 
-    /*
-     * MIME LENGTH
-     */
 
     result.push(
         (mimeBytes.length >> 8) & 0xff,
         mimeBytes.length & 0xff
     );
 
-    result.push(...mimeBytes);
+    result.push(
+        ...mimeBytes
+    );
 
-    /*
-     * FILE SIZE
-     */
 
     result.push(
         (fileSize >>> 24) & 0xff,
@@ -349,9 +502,6 @@ function buildHeader(name, mime, fileSize, checksum) {
         fileSize & 0xff
     );
 
-    /*
-     * CRC32
-     */
 
     result.push(
         (checksum >>> 24) & 0xff,
@@ -360,11 +510,21 @@ function buildHeader(name, mime, fileSize, checksum) {
         checksum & 0xff
     );
 
+
     return new Uint8Array(result);
 }
 
 
-/* CUSTOM 13-BIT PROTOCOL */
+/*
+ * CUSTOM PROTOCOL
+ *
+ * Every byte becomes:
+ *
+ * RANDOM RANDOM RANDOM RANDOM RANDOM
+ * DATA DATA DATA DATA DATA DATA DATA DATA
+ *
+ * 13 bits total
+ */
 
 function encodeCustomBits(bytes) {
 
@@ -372,25 +532,27 @@ function encodeCustomBits(bytes) {
 
     for (const byte of bytes) {
 
-        /*
-         * Five random bits.
-         */
-
         const randomBits =
             new Uint8Array(5);
 
-        crypto.getRandomValues(randomBits);
+        crypto.getRandomValues(
+            randomBits
+        );
+
 
         for (let i = 0; i < 5; i++) {
-            bits.push(randomBits[i] & 1);
+
+            bits.push(
+                randomBits[i] & 1
+            );
         }
 
-        /*
-         * Eight actual data bits.
-         */
 
         for (let i = 7; i >= 0; i--) {
-            bits.push((byte >> i) & 1);
+
+            bits.push(
+                (byte >> i) & 1
+            );
         }
     }
 
@@ -398,7 +560,9 @@ function encodeCustomBits(bytes) {
 }
 
 
-/* BYTES -> BITS */
+/*
+ * BYTES -> BITS
+ */
 
 function bytesToBits(bytes) {
 
@@ -407,7 +571,10 @@ function bytesToBits(bytes) {
     for (const byte of bytes) {
 
         for (let i = 7; i >= 0; i--) {
-            bits.push((byte >> i) & 1);
+
+            bits.push(
+                (byte >> i) & 1
+            );
         }
     }
 
@@ -415,13 +582,19 @@ function bytesToBits(bytes) {
 }
 
 
-/* BITS -> 4-BIT SYMBOLS */
+/*
+ * BITS -> 4-BIT SYMBOLS
+ */
 
 function bitsToSymbols(bits) {
 
     const symbols = [];
 
-    for (let i = 0; i < bits.length; i += 4) {
+    for (
+        let i = 0;
+        i < bits.length;
+        i += 4
+    ) {
 
         let value = 0;
 
@@ -429,8 +602,13 @@ function bitsToSymbols(bits) {
 
             value <<= 1;
 
-            if (i + j < bits.length) {
-                value |= bits[i + j];
+            if (
+                i + j <
+                bits.length
+            ) {
+
+                value |=
+                    bits[i + j];
             }
         }
 
@@ -441,44 +619,63 @@ function bitsToSymbols(bits) {
 }
 
 
-/* AUDIO */
+/*
+ * AUDIO GENERATION
+ */
 
 function createAudioBuffer(symbols) {
 
-    const symbolDuration =
+    const duration =
         MODES[currentMode];
 
     const samplesPerSymbol =
-        Math.floor(
-            SAMPLE_RATE * symbolDuration
+        Math.round(
+            SAMPLE_RATE *
+            duration
         );
 
     const totalSamples =
-        samplesPerSymbol * symbols.length;
+        samplesPerSymbol *
+        symbols.length;
 
-    const offline =
-        new OfflineAudioContext(
-            1,
-            totalSamples,
-            SAMPLE_RATE
-        );
 
     const buffer =
-        offline.createBuffer(
-            1,
-            totalSamples,
-            SAMPLE_RATE
-        );
+        new AudioBuffer({
+            length: totalSamples,
+            numberOfChannels: 1,
+            sampleRate: SAMPLE_RATE
+        });
+
 
     const channel =
         buffer.getChannelData(0);
 
-    let index = 0;
+
+    let position = 0;
+
+    let phase = 0;
+
 
     for (const symbol of symbols) {
 
         const frequency =
             FREQUENCIES[symbol];
+
+        const phaseStep =
+            2 *
+            Math.PI *
+            frequency /
+            SAMPLE_RATE;
+
+
+        const fadeSamples =
+            Math.min(
+                16,
+                Math.floor(
+                    samplesPerSymbol / 5
+                )
+            );
+
 
         for (
             let i = 0;
@@ -486,211 +683,289 @@ function createAudioBuffer(symbols) {
             i++
         ) {
 
-            const time =
-                i / SAMPLE_RATE;
-
-            /*
-             * Short fade prevents clicks.
-             */
-
-            const fadeSamples =
-                Math.min(
-                    100,
-                    Math.floor(samplesPerSymbol / 5)
-                );
-
             let envelope = 1;
 
-            if (i < fadeSamples) {
 
-                envelope =
-                    i / fadeSamples;
-
-            } else if (
-                i > samplesPerSymbol - fadeSamples
+            if (
+                i <
+                fadeSamples
             ) {
 
                 envelope =
-                    (samplesPerSymbol - i) /
+                    i /
+                    fadeSamples;
+
+            } else if (
+                i >
+                samplesPerSymbol -
+                fadeSamples
+            ) {
+
+                envelope =
+                    (
+                        samplesPerSymbol -
+                        i
+                    ) /
                     fadeSamples;
             }
 
-            channel[index++] =
-                Math.sin(
-                    2 *
-                    Math.PI *
-                    frequency *
-                    time
-                ) *
-                0.35 *
+
+            channel[position++] =
+                Math.sin(phase) *
+                0.45 *
                 envelope;
+
+
+            phase +=
+                phaseStep;
+
+
+            if (
+                phase >
+                Math.PI * 2
+            ) {
+
+                phase -=
+                    Math.PI * 2;
+            }
         }
     }
+
 
     return buffer;
 }
 
 
-/* PLAY */
+/*
+ * PLAY
+ */
 
-playButton.onclick = async () => {
+playButton.onclick =
+    async () => {
 
-    if (!audioBuffer) {
-        return;
-    }
+        if (!audioBuffer) {
+            return;
+        }
 
-    if (isPaused) {
+        if (isPaused) {
 
-        await resumeTransmission();
+            await resumeTransmission();
 
-    } else {
+        } else {
 
-        await startTransmission();
-    }
-};
+            await startTransmission();
+        }
+    };
 
 
 async function startTransmission() {
 
     stopAudioOnly();
 
+
     audioContext =
         new AudioContext({
             sampleRate: SAMPLE_RATE
         });
 
+
     await audioContext.resume();
+
 
     sourceNode =
         audioContext.createBufferSource();
 
+
     sourceNode.buffer =
         audioBuffer;
+
 
     sourceNode.connect(
         audioContext.destination
     );
 
-    sourceNode.onended = () => {
 
-        if (isPlaying) {
-            finishTransmission();
-        }
-    };
+    sourceNode.onended =
+        () => {
+
+            if (isPlaying) {
+                finishTransmission();
+            }
+        };
+
 
     sourceNode.start();
 
+
     transmissionStart =
         audioContext.currentTime;
+
 
     pausedAt = 0;
 
     isPlaying = true;
     isPaused = false;
 
+
     statusElement.textContent =
         "TRANSMITTING";
+
 
     playButton.disabled = true;
     pauseButton.disabled = false;
     stopButton.disabled = false;
 
-    log("Transmission started.");
+
+    log(
+        "Transmission started."
+    );
+
 
     updateTimer();
 }
 
 
-/* PAUSE */
+/*
+ * PAUSE
+ */
 
-pauseButton.onclick = async () => {
+pauseButton.onclick =
+    async () => {
 
-    if (!audioContext || !isPlaying) {
-        return;
-    }
-
-    pausedAt =
-        audioContext.currentTime -
-        transmissionStart;
-
-    await audioContext.suspend();
-
-    isPlaying = false;
-    isPaused = true;
-
-    statusElement.textContent =
-        "PAUSED";
-
-    playButton.textContent =
-        "RESUME";
-
-    playButton.disabled = false;
-    pauseButton.disabled = true;
-
-    log("Transmission paused.");
-};
+        if (
+            !audioContext ||
+            !isPlaying
+        ) {
+            return;
+        }
 
 
-/* RESUME */
+        pausedAt =
+            audioContext.currentTime -
+            transmissionStart;
+
+
+        await audioContext.suspend();
+
+
+        isPlaying = false;
+        isPaused = true;
+
+
+        statusElement.textContent =
+            "PAUSED";
+
+
+        playButton.textContent =
+            "RESUME";
+
+
+        playButton.disabled = false;
+        pauseButton.disabled = true;
+
+
+        log(
+            "Transmission paused."
+        );
+    };
+
+
+/*
+ * RESUME
+ */
 
 async function resumeTransmission() {
 
     await audioContext.resume();
 
+
     transmissionStart =
         audioContext.currentTime -
         pausedAt;
 
+
     isPlaying = true;
     isPaused = false;
+
 
     statusElement.textContent =
         "TRANSMITTING";
 
+
+    playButton.textContent =
+        "PAUSE";
+
+
     playButton.disabled = true;
     pauseButton.disabled = false;
 
-    log("Transmission resumed.");
+
+    log(
+        "Transmission resumed."
+    );
+
 
     updateTimer();
 }
 
 
-/* STOP */
+/*
+ * STOP
+ */
 
-stopButton.onclick = () => {
-    stopTransmission();
-};
+stopButton.onclick =
+    () => {
+
+        stopTransmission();
+    };
 
 
 function stopTransmission() {
 
     stopAudioOnly();
 
+
     isPlaying = false;
     isPaused = false;
 
     pausedAt = 0;
 
-    cancelAnimationFrame(animationFrame);
+
+    cancelAnimationFrame(
+        animationFrame
+    );
+
 
     const duration =
         audioBuffer
             ? audioBuffer.duration
             : 0;
 
-    elapsedTime.textContent = "00:00";
+
+    elapsedTime.textContent =
+        "00:00";
+
 
     remainingTime.textContent =
         formatTime(duration);
 
-    progressFill.style.width = "0%";
-    progressPercent.textContent = "0%";
+
+    progressFill.style.width =
+        "0%";
+
+    progressPercent.textContent =
+        "0%";
+
 
     statusElement.textContent =
-        audioBuffer ? "READY" : "WAITING FOR FILE";
+        audioBuffer
+            ? "READY"
+            : "WAITING FOR FILE";
 
-    playButton.textContent = "PLAY";
+
+    playButton.textContent =
+        "PLAY";
+
 
     playButton.disabled =
         !audioBuffer;
@@ -698,9 +973,16 @@ function stopTransmission() {
     pauseButton.disabled = true;
     stopButton.disabled = true;
 
-    log("Transmission stopped.");
+
+    log(
+        "Transmission stopped."
+    );
 }
 
+
+/*
+ * STOP AUDIO
+ */
 
 function stopAudioOnly() {
 
@@ -715,6 +997,7 @@ function stopAudioOnly() {
         sourceNode = null;
     }
 
+
     if (audioContext) {
 
         audioContext.close();
@@ -724,56 +1007,86 @@ function stopAudioOnly() {
 }
 
 
-/* FINISH */
+/*
+ * FINISH
+ */
 
 function finishTransmission() {
 
     isPlaying = false;
     isPaused = false;
 
-    cancelAnimationFrame(animationFrame);
+
+    cancelAnimationFrame(
+        animationFrame
+    );
+
 
     statusElement.textContent =
         "TRANSMISSION COMPLETE";
+
 
     playButton.disabled = false;
     pauseButton.disabled = true;
     stopButton.disabled = true;
 
-    progressFill.style.width = "100%";
-    progressPercent.textContent = "100%";
+
+    progressFill.style.width =
+        "100%";
+
+    progressPercent.textContent =
+        "100%";
+
 
     elapsedTime.textContent =
-        formatTime(audioBuffer.duration);
+        formatTime(
+            audioBuffer.duration
+        );
+
 
     remainingTime.textContent =
         "00:00";
 
-    log("Transmission complete.");
+
+    log(
+        "Transmission complete."
+    );
+
 
     if (audioContext) {
+
         audioContext.close();
+
         audioContext = null;
     }
+
 
     sourceNode = null;
 }
 
 
-/* TIMER */
+/*
+ * TIMER
+ */
 
 function updateTimer() {
 
-    if (!isPlaying || !audioContext) {
+    if (
+        !isPlaying ||
+        !audioContext
+    ) {
         return;
     }
+
 
     const elapsed =
         audioContext.currentTime -
         transmissionStart;
 
+
     const total =
         audioBuffer.duration;
+
 
     const progress =
         Math.min(
@@ -781,8 +1094,10 @@ function updateTimer() {
             elapsed / total
         );
 
+
     elapsedTime.textContent =
         formatTime(elapsed);
+
 
     remainingTime.textContent =
         formatTime(
@@ -792,11 +1107,16 @@ function updateTimer() {
             )
         );
 
+
     progressFill.style.width =
         `${progress * 100}%`;
 
+
     progressPercent.textContent =
-        `${Math.floor(progress * 100)}%`;
+        `${Math.floor(
+            progress * 100
+        )}%`;
+
 
     animationFrame =
         requestAnimationFrame(
@@ -805,7 +1125,9 @@ function updateTimer() {
 }
 
 
-/* WAVEFORM */
+/*
+ * WAVEFORM
+ */
 
 function drawWaveform(buffer) {
 
@@ -817,6 +1139,7 @@ function drawWaveform(buffer) {
         canvas.clientHeight *
         window.devicePixelRatio;
 
+
     ctx.clearRect(
         0,
         0,
@@ -824,11 +1147,14 @@ function drawWaveform(buffer) {
         canvas.height
     );
 
+
     const data =
         buffer.getChannelData(0);
 
+
     const center =
         canvas.height / 2;
+
 
     const step =
         Math.max(
@@ -839,7 +1165,9 @@ function drawWaveform(buffer) {
             )
         );
 
+
     ctx.beginPath();
+
 
     for (
         let x = 0;
@@ -850,36 +1178,60 @@ function drawWaveform(buffer) {
         const value =
             data[x * step] || 0;
 
+
         const y =
             center +
             value *
             center *
             0.85;
 
+
         if (x === 0) {
-            ctx.moveTo(x, y);
+
+            ctx.moveTo(
+                x,
+                y
+            );
+
         } else {
-            ctx.lineTo(x, y);
+
+            ctx.lineTo(
+                x,
+                y
+            );
         }
     }
 
-    ctx.strokeStyle = "#4aa8ff";
+
+    ctx.strokeStyle =
+        "#4aa8ff";
+
     ctx.lineWidth = 1;
+
     ctx.stroke();
 }
 
 
-/* CRC32 */
+/*
+ * CRC32
+ */
 
 function crc32(bytes) {
 
-    let crc = 0xffffffff;
+    let crc =
+        0xffffffff;
+
 
     for (const byte of bytes) {
 
         crc ^= byte;
 
-        for (let i = 0; i < 8; i++) {
+
+        for (
+            let i = 0;
+            i < 8;
+            i++
+        ) {
 
             crc =
                 (crc >>> 1) ^
@@ -890,11 +1242,17 @@ function crc32(bytes) {
         }
     }
 
-    return (crc ^ 0xffffffff) >>> 0;
+
+    return (
+        crc ^
+        0xffffffff
+    ) >>> 0;
 }
 
 
-/* FORMAT */
+/*
+ * FORMAT TIME
+ */
 
 function formatTime(seconds) {
 
@@ -904,41 +1262,58 @@ function formatTime(seconds) {
             Math.floor(seconds)
         );
 
+
     const hours =
-        Math.floor(seconds / 3600);
+        Math.floor(
+            seconds / 3600
+        );
+
 
     const minutes =
         Math.floor(
             (seconds % 3600) / 60
         );
 
+
     const secs =
         seconds % 60;
+
 
     if (hours > 0) {
 
         return (
-            String(hours).padStart(2, "0") +
+            String(hours)
+                .padStart(2, "0") +
             ":" +
-            String(minutes).padStart(2, "0") +
+            String(minutes)
+                .padStart(2, "0") +
             ":" +
-            String(secs).padStart(2, "0")
+            String(secs)
+                .padStart(2, "0")
         );
     }
 
+
     return (
-        String(minutes).padStart(2, "0") +
+        String(minutes)
+            .padStart(2, "0") +
         ":" +
-        String(secs).padStart(2, "0")
+        String(secs)
+            .padStart(2, "0")
     );
 }
 
+
+/*
+ * FORMAT BYTES
+ */
 
 function formatBytes(bytes) {
 
     if (bytes === 0) {
         return "0 B";
     }
+
 
     const units = [
         "B",
@@ -947,30 +1322,55 @@ function formatBytes(bytes) {
         "GB"
     ];
 
+
     const index =
         Math.floor(
             Math.log(bytes) /
             Math.log(1024)
         );
 
+
     return (
         (
             bytes /
-            Math.pow(1024, index)
+            Math.pow(
+                1024,
+                index
+            )
         ).toFixed(
-            index === 0 ? 0 : 2
+            index === 0
+                ? 0
+                : 2
         )
-        + " "
-        + units[index]
+        +
+        " " +
+        units[index]
     );
 }
 
 
-/* INITIAL */
+/*
+ * INITIAL
+ */
 
 playButton.disabled = true;
 pauseButton.disabled = true;
 stopButton.disabled = true;
 
-log("SONICCRYPT TURBO transmitter initialized.");
-log("16-FSK acoustic protocol loaded.");
+
+turboButton.classList.add(
+    "active"
+);
+
+
+log(
+    "SONICCRYPT TURBO transmitter initialized."
+);
+
+log(
+    "16-FSK: 1000-4000 Hz."
+);
+
+log(
+    "Synchronization preamble enabled."
+);
